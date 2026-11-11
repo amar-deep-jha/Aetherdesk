@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/AetherDesk.Cli/AetherDesk.Cli.csproj" />
+    <Project Path="src/AetherDesk.Client/AetherDesk.Client.csproj" />
+    <Project Path="src/AetherDesk.Core/AetherDesk.Core.csproj" />
+    <Project Path="src/AetherDesk.Host/AetherDesk.Host.csproj" />
+    <Project Path="src/AetherDesk.Server/AetherDesk.Server.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/AetherDesk.Core.Tests/AetherDesk.Core.Tests.csproj" />
+    <Project Path="tests/AetherDesk.E2E.Tests/AetherDesk.E2E.Tests.csproj" />
+    <Project Path="tests/AetherDesk.Integration.Tests/AetherDesk.Integration.Tests.csproj" />
+  </Folder>
+</Solution>

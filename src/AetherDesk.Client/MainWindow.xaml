@@ -1,0 +1,170 @@
+<Window x:Class="AetherDesk.Client.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AetherDesk - Ultra-Low Latency Secure Remote Desktop" Height="680" Width="980"
+        Background="#0B0F19" WindowStartupLocation="CenterScreen">
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="64" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="32" />
+        </Grid.RowDefinitions>
+
+        <!-- Top Navigation Bar -->
+        <Border Grid.Row="0" Background="#111827" BorderBrush="#1F2937" BorderThickness="0,0,0,1" Padding="20,0">
+            <DockPanel VerticalAlignment="Center">
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
+                    <!-- Brand Icon & Name -->
+                    <Border Width="34" Height="34" Background="#06B6D4" CornerRadius="8" Margin="0,0,12,0">
+                        <TextBlock Text="AD" Foreground="#0B0F19" FontWeight="Bold" FontSize="16" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                    </Border>
+                    <TextBlock Text="AetherDesk" Foreground="#F9FAFB" FontWeight="Bold" FontSize="20" VerticalAlignment="Center" />
+                    <Border Background="#1F2937" CornerRadius="4" Padding="6,2" Margin="10,0,0,0" VerticalAlignment="Center">
+                        <TextBlock Text="v1.0.0-Release" Foreground="#9CA3AF" FontSize="11" FontWeight="Medium" />
+                    </Border>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <Ellipse x:Name="ElpSignalingStatus" Width="10" Height="10" Fill="#10B981" Margin="0,0,8,0" />
+                    <TextBlock x:Name="TxtSignalingStatus" Text="Signaling: Connected" Foreground="#9CA3AF" FontSize="12" VerticalAlignment="Center" Margin="0,0,16,0" />
+                    <Button Content="Quick Host Test" Click="BtnQuickHostTest_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="10,5" Margin="0,0,8,0" Cursor="Hand" />
+                    <Button Content="Settings" Click="BtnSettings_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="10,5" Cursor="Hand" />
+                </StackPanel>
+            </DockPanel>
+        </Border>
+
+        <!-- Main Body -->
+        <Grid Grid.Row="1" Margin="24">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+
+            <!-- Incoming Connection Banner (Conditional) -->
+            <Border x:Name="PnlIncomingConnection" Grid.Row="0" Background="#1E1B4B" BorderBrush="#6366F1" BorderThickness="1" CornerRadius="8" Padding="16" Margin="0,0,0,20" Visibility="Collapsed">
+                <DockPanel>
+                    <StackPanel DockPanel.Dock="Left">
+                        <TextBlock x:Name="TxtIncomingPrompt" Text="Incoming Connection Request from 000 000 000" Foreground="#FFFFFF" FontWeight="Bold" FontSize="14" />
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <CheckBox x:Name="ChkAllowInput" Content="Allow Mouse &amp; Keyboard" IsChecked="True" Foreground="#D1D5DB" Margin="0,0,14,0" />
+                            <CheckBox x:Name="ChkAllowClipboard" Content="Allow Clipboard" IsChecked="True" Foreground="#D1D5DB" Margin="0,0,14,0" />
+                            <CheckBox x:Name="ChkAllowFileTransfer" Content="Allow File Transfer" IsChecked="True" Foreground="#D1D5DB" />
+                        </StackPanel>
+                    </StackPanel>
+                    <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
+                        <Button Content="Accept" Click="BtnAcceptConnection_Click" Background="#10B981" Foreground="#FFFFFF" FontWeight="Bold" BorderThickness="0" Padding="18,8" Margin="0,0,10,0" Cursor="Hand" />
+                        <Button Content="Decline" Click="BtnDeclineConnection_Click" Background="#EF4444" Foreground="#FFFFFF" FontWeight="Bold" BorderThickness="0" Padding="18,8" Cursor="Hand" />
+                    </StackPanel>
+                </DockPanel>
+            </Border>
+
+            <!-- Dual Connection Cards: This Device & Remote Device -->
+            <Grid Grid.Row="1" Margin="0,0,0,20">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="20" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Card 1: This Device -->
+                <Border Grid.Column="0" Background="#111827" BorderBrush="#1F2937" BorderThickness="1" CornerRadius="8" Padding="20">
+                    <StackPanel>
+                        <TextBlock Text="THIS DEVICE (YOUR ID)" Foreground="#9CA3AF" FontSize="12" FontWeight="SemiBold" />
+                        <DockPanel Margin="0,8,0,16">
+                            <TextBlock x:Name="TxtLocalDeviceId" Text="000 000 000" Foreground="#06B6D4" FontSize="32" FontWeight="Bold" FontFamily="Consolas, Segoe UI" VerticalAlignment="Center" DockPanel.Dock="Left" />
+                            <Button Content="Copy" Click="BtnCopyId_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="12,6" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center" Cursor="Hand" />
+                        </DockPanel>
+
+                        <Separator Background="#1F2937" Margin="0,0,0,12" />
+
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Left">
+                                <TextBlock Text="Unattended Access" Foreground="#F3F4F6" FontWeight="Medium" FontSize="13" />
+                                <TextBlock x:Name="TxtUnattendedStatus" Text="Password protection enabled" Foreground="#10B981" FontSize="11" Margin="0,2,0,0" />
+                            </StackPanel>
+                            <Button Content="Configure" Click="BtnConfigPassword_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="10,4" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center" Cursor="Hand" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+
+                <!-- Card 2: Control Remote Device -->
+                <Border Grid.Column="2" Background="#111827" BorderBrush="#1F2937" BorderThickness="1" CornerRadius="8" Padding="20">
+                    <StackPanel>
+                        <TextBlock Text="CONTROL REMOTE DEVICE" Foreground="#9CA3AF" FontSize="12" FontWeight="SemiBold" />
+                        <Grid Margin="0,8,0,16">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <TextBox x:Name="TxtPartnerIdInput" Grid.Column="0" Background="#1F2937" Foreground="#FFFFFF" BorderBrush="#374151" Padding="12,10" FontSize="18" FontWeight="SemiBold" TextChanged="TxtPartnerIdInput_TextChanged" />
+                            <TextBlock x:Name="TxtLuhnIndicator" Grid.Column="1" Text="✓ Valid ID" Foreground="#10B981" FontWeight="Bold" VerticalAlignment="Center" Margin="10,0,0,0" Visibility="Collapsed" />
+                        </Grid>
+
+                        <DockPanel>
+                            <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center">
+                                <TextBlock Text="Encryption: E2EE AES-256-GCM" Foreground="#9CA3AF" FontSize="11" />
+                                <TextBlock Text="NAT Traversal: Direct P2P + Relay Fallback" Foreground="#9CA3AF" FontSize="11" />
+                            </StackPanel>
+                            <Button x:Name="BtnConnect" Content="Connect" Click="BtnConnect_Click" Background="#06B6D4" Foreground="#0B0F19" FontWeight="Bold" FontSize="14" BorderThickness="0" Padding="24,10" DockPanel.Dock="Right" HorizontalAlignment="Right" Cursor="Hand" />
+                        </DockPanel>
+                    </StackPanel>
+                </Border>
+            </Grid>
+
+            <!-- Lower Section: Tabs (Recent Sessions, Trusted Devices, Diagnostics) -->
+            <TabControl Grid.Row="2" Background="#111827" BorderBrush="#1F2937">
+                <TabControl.Resources>
+                    <Style TargetType="TabItem">
+                        <Setter Property="Foreground" Value="#9CA3AF" />
+                        <Setter Property="Background" Value="#1F2937" />
+                        <Setter Property="Padding" Value="14,8" />
+                        <Setter Property="FontWeight" Value="SemiBold" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="TabItem">
+                                    <Border Name="Border" Background="{TemplateBinding Background}" BorderBrush="#1F2937" BorderThickness="1,1,1,0" CornerRadius="4,4,0,0" Margin="0,0,4,0" Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter ContentSource="Header" HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="Border" Property="Background" Value="#111827" />
+                                            <Setter Property="Foreground" Value="#06B6D4" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </TabControl.Resources>
+
+                <!-- Tab 1: Recent Sessions -->
+                <TabItem Header="Recent Sessions">
+                    <DataGrid x:Name="DgRecentSessions" Background="#111827" Foreground="#E5E7EB" RowBackground="#111827" AlternatingRowBackground="#161F30" BorderThickness="0" AutoGenerateColumns="False" IsReadOnly="True" GridLinesVisibility="None" Padding="10">
+                        <DataGrid.Columns>
+                            <DataGridTextColumn Header="Partner ID" Binding="{Binding PartnerId}" Width="150" />
+                            <DataGridTextColumn Header="Partner Name" Binding="{Binding PartnerName}" Width="200" />
+                            <DataGridTextColumn Header="Connected At (UTC)" Binding="{Binding StartedAtUtc, StringFormat='{}{0:yyyy-MM-dd HH:mm}'}" Width="180" />
+                            <DataGridTextColumn Header="Data Transferred" Binding="{Binding BytesTransferred}" Width="*" />
+                        </DataGrid.Columns>
+                    </DataGrid>
+                </TabItem>
+
+                <!-- Tab 2: Activity Logs & Diagnostics -->
+                <TabItem Header="Security &amp; Diagnostics">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Background="#030712" Padding="12">
+                        <TextBlock x:Name="TxtDiagnostics" Text="System ready. All modules initialized." Foreground="#9CA3AF" FontFamily="Consolas" FontSize="12" />
+                    </ScrollViewer>
+                </TabItem>
+            </TabControl>
+        </Grid>
+
+        <!-- Bottom Status Bar -->
+        <Border Grid.Row="2" Background="#090D16" BorderBrush="#1F2937" BorderThickness="0,1,0,0" Padding="16,0">
+            <DockPanel VerticalAlignment="Center">
+                <TextBlock x:Name="TxtFooterStatus" Text="Ready for connections" Foreground="#6B7280" FontSize="11" DockPanel.Dock="Left" />
+                <TextBlock Text="AetherDesk Autonomous Production Build 1.0.0" Foreground="#4B5563" FontSize="11" DockPanel.Dock="Right" HorizontalAlignment="Right" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</Window>

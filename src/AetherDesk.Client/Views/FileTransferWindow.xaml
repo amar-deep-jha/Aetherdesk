@@ -1,0 +1,103 @@
+<Window x:Class="AetherDesk.Client.Views.FileTransferWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="AetherDesk - Secure File Transfer Manager" Height="550" Width="850"
+        Background="#0B0F19" WindowStartupLocation="CenterOwner">
+    <Grid Margin="16">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Header -->
+        <Border Grid.Row="0" Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="File Transfer Manager" Foreground="#F9FAFB" FontSize="18" FontWeight="Bold" />
+                <TextBlock Text=" (End-to-End Encrypted)" Foreground="#06B6D4" FontSize="13" VerticalAlignment="Center" Margin="8,0,0,0" />
+            </StackPanel>
+        </Border>
+
+        <!-- Dual Panes -->
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="90" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- Local File System -->
+            <Border Grid.Column="0" Background="#111827" BorderBrush="#1F2937" BorderThickness="1" CornerRadius="6" Padding="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="Local Computer" Foreground="#F3F4F6" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6" />
+                    <DockPanel Grid.Row="1" Margin="0,0,0,8">
+                        <Button Content="Up" Click="BtnLocalUp_Click" DockPanel.Dock="Right" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,4" Margin="4,0,0,0" />
+                        <TextBox x:Name="TxtLocalPath" Background="#1F2937" Foreground="#FFFFFF" BorderBrush="#374151" Padding="6,4" />
+                    </DockPanel>
+
+                    <ListBox x:Name="LstLocalFiles" Grid.Row="2" Background="#030712" BorderBrush="#1F2937" Foreground="#E5E7EB" MouseDoubleClick="LstLocalFiles_MouseDoubleClick">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel Margin="0,2">
+                                    <TextBlock Text="{Binding Name}" Foreground="#F9FAFB" DockPanel.Dock="Left" />
+                                    <TextBlock Text="{Binding SizeText}" Foreground="#9CA3AF" DockPanel.Dock="Right" HorizontalAlignment="Right" />
+                                </DockPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+
+            <!-- Transfer Transfer Actions -->
+            <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center">
+                <Button Content="Upload ->" Click="BtnUpload_Click" Background="#06B6D4" Foreground="#FFFFFF" FontWeight="SemiBold" BorderThickness="0" Padding="8,8" Margin="0,0,0,12" Cursor="Hand" />
+                <Button Content="Refresh" Click="BtnRefresh_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,6" Cursor="Hand" />
+            </StackPanel>
+
+            <!-- Remote File System -->
+            <Border Grid.Column="2" Background="#111827" BorderBrush="#1F2937" BorderThickness="1" CornerRadius="6" Padding="8">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <TextBlock Grid.Row="0" Text="Remote Workstation" Foreground="#F3F4F6" FontWeight="SemiBold" FontSize="13" Margin="0,0,0,6" />
+                    <DockPanel Grid.Row="1" Margin="0,0,0,8">
+                        <Button Content="Up" Click="BtnRemoteUp_Click" DockPanel.Dock="Right" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,4" Margin="4,0,0,0" />
+                        <TextBox x:Name="TxtRemotePath" Background="#1F2937" Foreground="#FFFFFF" BorderBrush="#374151" Padding="6,4" />
+                    </DockPanel>
+
+                    <ListBox x:Name="LstRemoteFiles" Grid.Row="2" Background="#030712" BorderBrush="#1F2937" Foreground="#E5E7EB" MouseDoubleClick="LstRemoteFiles_MouseDoubleClick">
+                        <ListBox.ItemTemplate>
+                            <DataTemplate>
+                                <DockPanel Margin="0,2">
+                                    <TextBlock Text="{Binding Name}" Foreground="#F9FAFB" DockPanel.Dock="Left" />
+                                    <TextBlock Text="{Binding SizeText}" Foreground="#9CA3AF" DockPanel.Dock="Right" HorizontalAlignment="Right" />
+                                </DockPanel>
+                            </DataTemplate>
+                        </ListBox.ItemTemplate>
+                    </ListBox>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- Progress Footer -->
+        <Border Grid.Row="2" Margin="0,12,0,0" Background="#111827" BorderBrush="#1F2937" BorderThickness="1" CornerRadius="6" Padding="12,8">
+            <StackPanel>
+                <DockPanel Margin="0,0,0,4">
+                    <TextBlock x:Name="TxtTransferStatus" Text="Idle - Select a file to transfer" Foreground="#9CA3AF" FontSize="12" DockPanel.Dock="Left" />
+                    <TextBlock x:Name="TxtTransferSpeed" Text="0.0 MB/s" Foreground="#06B6D4" FontSize="12" FontWeight="SemiBold" DockPanel.Dock="Right" HorizontalAlignment="Right" />
+                </DockPanel>
+                <ProgressBar x:Name="PbTransfer" Height="6" Background="#1F2937" Foreground="#06B6D4" BorderThickness="0" Value="0" />
+            </StackPanel>
+        </Border>
+    </Grid>
+</Window>
