@@ -1,4 +1,6 @@
 using System.Collections.ObjectModel;
+using System.Diagnostics;
+using System.IO;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -28,6 +30,7 @@ public partial class ViewerWindow : Window
         LstChat.ItemsSource = _chatMessages;
 
         _session.ResolutionChanged += OnResolutionChanged;
+        _session.FrameReady += OnFrameReady;
         _session.TileRendered += OnTileRendered;
         _session.ChatMessageReceived += OnChatMessageReceived;
         _session.SessionDisconnected += OnSessionDisconnected;
@@ -59,9 +62,29 @@ public partial class ViewerWindow : Window
         InitBitmap(w, h);
     }
 
+    private void OnFrameReady(int minX, int minY, int w, int h)
+    {
+        Dispatcher.BeginInvoke(DispatcherPriority.Render, () =>
+        {
+            if (_bitmap == null || w <= 0 || h <= 0) return;
+
+            int requiredBufferSize = w * h * 4;
+            if (_tileScratchBuffer.Length < requiredBufferSize)
+            {
+                _tileScratchBuffer = new byte[requiredBufferSize];
+            }
+
+            int destStride = w * 4;
+            _session.CopyFrameRegion(minX, minY, w, h, _tileScratchBuffer, destStride);
+
+            var rect = new Int32Rect(minX, minY, w, h);
+            _bitmap.WritePixels(rect, _tileScratchBuffer, destStride, 0);
+        });
+    }
+
     private void OnTileRendered(int x, int y, int w, int h)
     {
-        Dispatcher.Invoke(() =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Render, () =>
         {
             if (_bitmap == null) return;
 
@@ -93,15 +116,23 @@ public partial class ViewerWindow : Window
         });
     }
 
+    private long _lastMouseMoveTick;
+
     private void ImgViewport_MouseMove(object sender, MouseEventArgs e)
     {
         var pos = e.GetPosition(ImgViewport);
-        if (_session.Width <= 0 || _session.Height <= 0) return;
+        if (_session.Width <= 0 || _session.Height <= 0 || ImgViewport.ActualWidth <= 0 || ImgViewport.ActualHeight <= 0) return;
 
         int normX = (int)Math.Clamp(Math.Round(pos.X * 65535 / ImgViewport.ActualWidth), 0, 65535);
         int normY = (int)Math.Clamp(Math.Round(pos.Y * 65535 / ImgViewport.ActualHeight), 0, 65535);
 
-        _ = _session.SendMouseMoveAsync(normX, normY, isNormalized: true);
+        long now = Stopwatch.GetTimestamp();
+        // 60 Hz rate limit (16 ms)
+        if ((now - _lastMouseMoveTick) * 1000 / Stopwatch.Frequency >= 16)
+        {
+            _lastMouseMoveTick = now;
+            _ = _session.SendMouseMoveAsync(normX, normY, isNormalized: true);
+        }
     }
 
     private void ImgViewport_MouseDown(object sender, MouseButtonEventArgs e)
@@ -145,6 +176,43 @@ public partial class ViewerWindow : Window
         if (TxtChatInput.IsFocused) return;
         int vk = KeyInterop.VirtualKeyFromKey(e.Key);
         _ = _session.SendKeyUpAsync((ushort)vk, 0, false);
+    }
+
+    private void BtnCtrlAltDel_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _session.SendSystemCommandAsync(SystemCommandType.CtrlAltDel);
+    }
+
+    private void BtnWinKey_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _session.SendSystemCommandAsync(SystemCommandType.WinKey);
+    }
+
+    private void BtnLock_Click(object sender, RoutedEventArgs e)
+    {
+        _ = _session.SendSystemCommandAsync(SystemCommandType.LockWorkstation);
+    }
+
+    private void BtnScreenshot_Click(object sender, RoutedEventArgs e)
+    {
+        if (_bitmap == null) return;
+        try
+        {
+            string desktop = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+            string filename = $"AetherDesk-Screenshot-{DateTime.Now:yyyyMMdd-HHmmss}.png";
+            string fullPath = Path.Combine(desktop, filename);
+
+            using var fileStream = new FileStream(fullPath, FileMode.Create);
+            var encoder = new PngBitmapEncoder();
+            encoder.Frames.Add(BitmapFrame.Create(_bitmap));
+            encoder.Save(fileStream);
+
+            MessageBox.Show($"Screenshot saved to Desktop:\n{filename}", "AetherDesk Screenshot", MessageBoxButton.OK, MessageBoxImage.Information);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"Failed to save screenshot: {ex.Message}", "AetherDesk", MessageBoxButton.OK, MessageBoxImage.Error);
+        }
     }
 
     private void BtnKeyFrame_Click(object sender, RoutedEventArgs e)

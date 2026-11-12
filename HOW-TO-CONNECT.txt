@@ -1,0 +1,25 @@
+=====================================================
+AetherDesk - Partner Quick Start Guide
+=====================================================
+
+1. Double-click "AetherDesk.Client.exe" to start the app.
+   (The relay server is pre-configured automatically via server.txt)
+
+2. Look at the top-left section under "THIS DEVICE (YOUR ID)":
+   You will see your 9-digit Device ID (e.g., 588 872 978).
+
+3. Send or read this 9-digit ID to your partner.
+
+4. When they click Connect, you will see a prompt on your screen:
+   "Incoming Connection Request from [Partner ID]"
+
+5. Click "Accept" to allow the remote session!
+
+=====================================================
+Features Available During Session:
+- Mouse & Keyboard Remote Control
+- Dual-Pane High Speed File Transfer
+- Real-time In-Session Chat
+- Dynamic Scaling (Fit to Window vs 1:1 Pixel Native)
+- End-to-End Encrypted (AES-256-GCM + ECDH P-256)
+=====================================================

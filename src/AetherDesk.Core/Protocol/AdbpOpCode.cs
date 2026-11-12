@@ -27,6 +27,7 @@ public enum AdbpOpCode : byte
     KeyFrameRequest = 0x24,
     MonitorList = 0x25,
     SelectMonitor = 0x26,
+    ScreenTileBatch = 0x27,
 
     // User Input Injection (0x40 - 0x5F)
     MouseMove = 0x40,
@@ -35,6 +36,7 @@ public enum AdbpOpCode : byte
     KeyDown = 0x43,
     KeyUp = 0x44,
     UnicodeChar = 0x45,
+    SystemCommand = 0x46,
 
     // Clipboard Synchronization (0x60 - 0x6F)
     ClipboardSync = 0x60,

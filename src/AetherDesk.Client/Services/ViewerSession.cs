@@ -34,6 +34,7 @@ public sealed class ViewerSession : IDisposable
     public string SessionId => _sessionId;
 
     public event Action<int, int, int, int>? TileRendered; // x, y, w, h
+    public event Action<int, int, int, int>? FrameReady; // minX, minY, width, height
     public event Action<int, int>? ResolutionChanged;
     public event Action<ChatMessageMsg>? ChatMessageReceived;
     public event Action<FileBrowseResponseMsg>? FileBrowseReceived;
@@ -146,6 +147,52 @@ public sealed class ViewerSession : IDisposable
                         _framebuffer = new byte[_width * _height * 4];
                     }
                     ResolutionChanged?.Invoke(_width, _height);
+                }
+                break;
+
+            case AdbpOpCode.ScreenTileBatch:
+                var batch = ScreenTileBatchMsg.Deserialize(payload);
+                if (batch.Tiles.Count > 0)
+                {
+                    int minX = int.MaxValue, minY = int.MaxValue;
+                    int maxX = 0, maxY = 0;
+
+                    lock (_frameLock)
+                    {
+                        int frameStride = _width * 4;
+                        foreach (var t in batch.Tiles)
+                        {
+                            byte[] uncompressed = TileCompressor.DecompressTile(t.Data.Span, (int)t.UncompressedSize, t.Format);
+                            int tileStride = t.TileWidth * 4;
+
+                            for (int row = 0; row < t.TileHeight; row++)
+                            {
+                                int dstOffset = (t.TileY + row) * frameStride + (t.TileX * 4);
+                                int srcOffset = row * tileStride;
+                                if (dstOffset + tileStride <= _framebuffer.Length && srcOffset + tileStride <= uncompressed.Length)
+                                {
+                                    Buffer.BlockCopy(uncompressed, srcOffset, _framebuffer, dstOffset, tileStride);
+                                }
+                            }
+
+                            if (t.TileX < minX) minX = t.TileX;
+                            if (t.TileY < minY) minY = t.TileY;
+                            if (t.TileX + t.TileWidth > maxX) maxX = t.TileX + t.TileWidth;
+                            if (t.TileY + t.TileHeight > maxY) maxY = t.TileY + t.TileHeight;
+
+                            TileRendered?.Invoke(t.TileX, t.TileY, t.TileWidth, t.TileHeight);
+                        }
+                    }
+
+                    _framesReceived++;
+                    UpdateTelemetryMetrics();
+
+                    int dirtyW = Math.Min(_width - minX, maxX - minX);
+                    int dirtyH = Math.Min(_height - minY, maxY - minY);
+                    if (dirtyW > 0 && dirtyH > 0 && minX < _width && minY < _height)
+                    {
+                        FrameReady?.Invoke(minX, minY, dirtyW, dirtyH);
+                    }
                 }
                 break;
 
@@ -276,6 +323,12 @@ public sealed class ViewerSession : IDisposable
     {
         var msg = new FileBrowseRequestMsg { Path = path };
         return SendPacketAsync(AdbpOpCode.FileBrowseRequest, msg.Serialize());
+    }
+
+    public Task SendSystemCommandAsync(SystemCommandType command)
+    {
+        var msg = new SystemCommandMsg { Command = command };
+        return SendPacketAsync(AdbpOpCode.SystemCommand, msg.Serialize());
     }
 
     public Task RequestKeyFrameAsync()

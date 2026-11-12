@@ -1,4 +1,6 @@
+using System.Buffers;
 using System.IO;
+using System.Net.WebSockets;
 using AetherDesk.Core.Identity;
 using AetherDesk.Core.Protocol;
 using AetherDesk.Core.Protocol.Messages;
@@ -198,6 +200,14 @@ public sealed class HostSessionCoordinator : IDisposable
                 }
                 break;
 
+            case AdbpOpCode.SystemCommand:
+                if (Permissions.HasFlag(SessionPermissions.AllowKeyboard))
+                {
+                    var sysCmd = SystemCommandMsg.Deserialize(payload);
+                    WindowsInputInjector.InjectSystemCommand(sysCmd.Command);
+                }
+                break;
+
             case AdbpOpCode.ClipboardSync:
                 if (Permissions.HasFlag(SessionPermissions.AllowClipboard))
                 {
@@ -291,7 +301,7 @@ public sealed class HostSessionCoordinator : IDisposable
 
     private async Task CaptureAndStreamLoopAsync()
     {
-        const int targetFps = 30;
+        const int targetFps = 60;
         int frameIntervalMs = 1000 / targetFps;
 
         while (!_cts.Token.IsCancellationRequested && State == HostSessionState.Active)
@@ -302,16 +312,20 @@ public sealed class HostSessionCoordinator : IDisposable
             if (frame != null)
             {
                 uint frameId = unchecked(++_frameCounter);
-                bool forceKey = _requestKeyFrame || (frameId % 150 == 0);
+                bool forceKey = _requestKeyFrame || (frameId % 180 == 0);
                 if (forceKey)
                     _requestKeyFrame = false;
 
                 var changedTiles = _diffEngine.ProcessFrame(frame, forceKey, frameId);
-
-                foreach (var tile in changedTiles)
+                if (changedTiles.Count > 0)
                 {
-                    byte[] tilePayload = tile.Serialize();
-                    SendEncrypted(AdbpOpCode.ScreenTileFrame, tilePayload, AdbpFlags.Compressed);
+                    var batch = new ScreenTileBatchMsg
+                    {
+                        FrameId = frameId,
+                        Tiles = changedTiles
+                    };
+                    byte[] batchPayload = batch.Serialize();
+                    SendEncrypted(AdbpOpCode.ScreenTileBatch, batchPayload, AdbpFlags.Compressed);
                 }
             }
 
@@ -366,9 +380,77 @@ public sealed class HostSessionCoordinator : IDisposable
         SessionTerminated?.Invoke(reason);
     }
 
+    private ClientWebSocket? _relaySocket;
+
+    public async Task ConnectRelayAsync(string relayWsUrl)
+    {
+        try
+        {
+            _relaySocket = new ClientWebSocket();
+            await _relaySocket.ConnectAsync(new Uri(relayWsUrl), _cts.Token).ConfigureAwait(false);
+
+            OutgoingPacketReady += async packet =>
+            {
+                if (_relaySocket?.State == WebSocketState.Open)
+                {
+                    byte[] bytes = packet.Serialize();
+                    try
+                    {
+                        await _relaySocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Binary, true, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    catch { }
+                }
+            };
+
+            _ = Task.Run(ReceiveRelayLoopAsync);
+        }
+        catch { }
+    }
+
+    private async Task ReceiveRelayLoopAsync()
+    {
+        byte[] receiveBuffer = ArrayPool<byte>.Shared.Rent(64 * 1024);
+        using var stream = new MemoryStream();
+
+        try
+        {
+            while (!_cts.Token.IsCancellationRequested && _relaySocket?.State == WebSocketState.Open)
+            {
+                var result = await _relaySocket.ReceiveAsync(new ArraySegment<byte>(receiveBuffer), _cts.Token).ConfigureAwait(false);
+                if (result.MessageType == WebSocketMessageType.Close)
+                    break;
+
+                if (result.Count > 0)
+                {
+                    stream.Write(receiveBuffer, 0, result.Count);
+                    if (result.EndOfMessage)
+                    {
+                        byte[] rawBytes = stream.ToArray();
+                        stream.SetLength(0);
+
+                        if (AdbpPacket.TryDeserialize(rawBytes, out var packet, out _) && packet != null)
+                        {
+                            HandleIncomingPacket(packet);
+                        }
+                    }
+                }
+            }
+        }
+        catch { }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(receiveBuffer);
+        }
+    }
+
     public void Dispose()
     {
         TerminateSession("Host disposed.");
+        try
+        {
+            _relaySocket?.Dispose();
+        }
+        catch { }
         _capturer.Dispose();
         _ecdh.Dispose();
         _cipher?.Dispose();

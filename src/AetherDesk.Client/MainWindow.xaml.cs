@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.IO;
 using System.Windows;
 using System.Windows.Controls;
@@ -20,19 +21,40 @@ public partial class MainWindow : Window
     private readonly HostSessionCoordinator _hostCoordinator;
     private readonly ClientNetworkManager _networkManager;
 
-    private Action<bool>? _pendingApprovalCallback;
+    private readonly ConcurrentDictionary<string, ViewerSession> _activeViewerSessions = new();
+    private string? _pendingSessionId;
+    private string? _pendingCallerPubKey;
+    private Action<bool, string?>? _pendingApprovalCallback;
 
     public MainWindow()
     {
         InitializeComponent();
 
-        string appData = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AetherDesk");
+        string profile = "default";
+        foreach (var arg in Environment.GetCommandLineArgs())
+        {
+            if (arg.StartsWith("--profile=", StringComparison.OrdinalIgnoreCase))
+            {
+                profile = arg.Substring(10).Trim();
+                break;
+            }
+        }
+
+        string appData = profile == "default"
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AetherDesk")
+            : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "AetherDesk", "profiles", profile);
+
         if (!Directory.Exists(appData))
             Directory.CreateDirectory(appData);
 
         string configPath = Path.Combine(appData, "identity.json");
         _identity = DeviceIdentity.CreateOrLoad(configPath);
         _database = new DatabaseService(Path.Combine(appData, "aetherdesk.db"));
+
+        if (profile != "default")
+        {
+            Title = $"AetherDesk [Profile: {profile}] - Remote Device Simulator";
+        }
 
         // Display local identity
         TxtLocalDeviceId.Text = _identity.FormattedId;
@@ -45,6 +67,7 @@ public partial class MainWindow : Window
         _networkManager = new ClientNetworkManager(_identity, _database);
         _networkManager.SignalingStateChanged += OnSignalingStateChanged;
         _networkManager.IncomingConnectionPrompt += OnIncomingConnectionPrompt;
+        _networkManager.ConnectResponseReceived += OnConnectResponseReceived;
         _networkManager.StatusLogReceived += LogDiagnostic;
 
         Loaded += MainWindow_Loaded;
@@ -55,6 +78,36 @@ public partial class MainWindow : Window
         LoadRecentSessions();
 
         string signalingUrl = _database.GetSetting("signaling_url", "ws://localhost:5000/ws/signaling");
+
+        // Check if server.txt exists alongside executable
+        string appDir = AppDomain.CurrentDomain.BaseDirectory;
+        string serverTxt = Path.Combine(appDir, "server.txt");
+        if (File.Exists(serverTxt))
+        {
+            try
+            {
+                string txt = File.ReadAllText(serverTxt).Trim();
+                if (!string.IsNullOrEmpty(txt))
+                {
+                    signalingUrl = txt;
+                    _database.SetSetting("signaling_url", signalingUrl);
+                }
+            }
+            catch { }
+        }
+
+        // Check CLI arguments (e.g. --server=ws://...)
+        foreach (var arg in Environment.GetCommandLineArgs())
+        {
+            if (arg.StartsWith("--server=", StringComparison.OrdinalIgnoreCase))
+            {
+                signalingUrl = arg.Substring(9).Trim();
+                _database.SetSetting("signaling_url", signalingUrl);
+                break;
+            }
+        }
+
+        LogDiagnostic($"Connecting to server at: {signalingUrl}");
         await _networkManager.StartSignalingAsync(signalingUrl);
     }
 
@@ -91,17 +144,20 @@ public partial class MainWindow : Window
         });
     }
 
-    private void OnIncomingConnectionPrompt(string fromId, string sessionId, string pubKey, Action<bool> callback)
+    private void OnIncomingConnectionPrompt(string fromId, string sessionId, string pubKey, Action<bool, string?> callback)
     {
         Dispatcher.Invoke(() =>
         {
+            _pendingSessionId = sessionId;
+            _pendingCallerPubKey = pubKey;
             _pendingApprovalCallback = callback;
             TxtIncomingPrompt.Text = $"Incoming Connection Request from {DeviceIdGenerator.Format(fromId)}";
             PnlIncomingConnection.Visibility = Visibility.Visible;
+            LogDiagnostic($"Incoming connection request from {DeviceIdGenerator.Format(fromId)} (Session: {sessionId[..8]}).");
         });
     }
 
-    private void BtnAcceptConnection_Click(object sender, RoutedEventArgs e)
+    private async void BtnAcceptConnection_Click(object sender, RoutedEventArgs e)
     {
         PnlIncomingConnection.Visibility = Visibility.Collapsed;
 
@@ -110,20 +166,38 @@ public partial class MainWindow : Window
         if (ChkAllowClipboard.IsChecked == true) perms |= SessionPermissions.AllowClipboard;
         if (ChkAllowFileTransfer.IsChecked == true) perms |= SessionPermissions.AllowFileTransfer;
 
+        var hsReq = new HandshakeRequest
+        {
+            DeviceId = _identity.DeviceId,
+            EphemeralPublicKeyBase64 = _pendingCallerPubKey ?? ""
+        };
+        var hsResp = _hostCoordinator.HandleHandshake(hsReq);
         _hostCoordinator.ApproveSession(perms);
-        _pendingApprovalCallback?.Invoke(true);
+
+        _pendingApprovalCallback?.Invoke(true, hsResp.EphemeralPublicKeyBase64);
         _pendingApprovalCallback = null;
 
-        LogDiagnostic("Connection approved by user.");
+        if (!string.IsNullOrEmpty(_pendingSessionId))
+        {
+            string relayUrl = _networkManager.GetRelayUrl(_pendingSessionId, "host");
+            LogDiagnostic($"Connecting Host to relay: {relayUrl}...");
+            await _hostCoordinator.ConnectRelayAsync(relayUrl);
+        }
+
+        LogDiagnostic("Connection approved. Desktop streaming active.");
+        TxtFooterStatus.Text = "Streaming desktop to remote partner.";
     }
 
     private void BtnDeclineConnection_Click(object sender, RoutedEventArgs e)
     {
         PnlIncomingConnection.Visibility = Visibility.Collapsed;
-        _pendingApprovalCallback?.Invoke(false);
+        _pendingApprovalCallback?.Invoke(false, null);
         _pendingApprovalCallback = null;
+        _pendingSessionId = null;
+        _pendingCallerPubKey = null;
 
         LogDiagnostic("Connection rejected by user.");
+        TxtFooterStatus.Text = "Connection request declined.";
     }
 
     private void BtnCopyId_Click(object sender, RoutedEventArgs e)
@@ -146,7 +220,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private void BtnConnect_Click(object sender, RoutedEventArgs e)
+    private async void BtnConnect_Click(object sender, RoutedEventArgs e)
     {
         string partnerId = DeviceIdGenerator.CleanDigits(TxtPartnerIdInput.Text);
         if (!DeviceIdGenerator.IsValid(partnerId))
@@ -155,28 +229,88 @@ public partial class MainWindow : Window
             return;
         }
 
-        StartViewerSession(partnerId);
-    }
+        if (!_networkManager.IsConnectedToSignaling)
+        {
+            MessageBox.Show("Not connected to signaling server. Please check your network connection or server settings.", "AetherDesk", MessageBoxButton.OK, MessageBoxImage.Warning);
+            return;
+        }
 
-    private void StartViewerSession(string partnerId)
-    {
+        BtnConnect.IsEnabled = false;
+        TxtFooterStatus.Text = $"Requesting connection to {DeviceIdGenerator.Format(partnerId)}...";
+        LogDiagnostic($"Initiating connection request to partner {DeviceIdGenerator.Format(partnerId)}...");
+
         string sessionId = Guid.NewGuid().ToString("N");
         var session = new ViewerSession(partnerId, sessionId);
+        _activeViewerSessions[sessionId] = session;
 
-        // Record in database
-        _database.AddRecentSession(new RecentSession
+        await _networkManager.SendConnectRequestAsync(partnerId, sessionId, session.GetLocalPublicKeyBase64());
+    }
+
+    private async void OnConnectResponseReceived(string sessionId, bool accepted, string? hostPubKey, string? error)
+    {
+        await Dispatcher.InvokeAsync(async () =>
         {
-            SessionId = sessionId,
-            PartnerId = DeviceIdGenerator.Format(partnerId),
-            PartnerName = $"Remote Device {DeviceIdGenerator.Format(partnerId)}",
-            StartedAtUtc = DateTime.UtcNow
+            BtnConnect.IsEnabled = true;
+
+            if (!_activeViewerSessions.TryGetValue(sessionId, out var session))
+                return;
+
+            if (!accepted)
+            {
+                _activeViewerSessions.TryRemove(sessionId, out _);
+                session.Dispose();
+                string msg = !string.IsNullOrEmpty(error) ? error : "Partner declined the connection request.";
+                LogDiagnostic($"Connection failed: {msg}");
+                MessageBox.Show($"Connection failed:\n{msg}", "AetherDesk", MessageBoxButton.OK, MessageBoxImage.Warning);
+                TxtFooterStatus.Text = "Connection request declined.";
+                return;
+            }
+
+            if (string.IsNullOrEmpty(hostPubKey))
+            {
+                _activeViewerSessions.TryRemove(sessionId, out _);
+                session.Dispose();
+                LogDiagnostic("Security error: Partner accepted without cryptographic key.");
+                MessageBox.Show("Security error: Partner did not provide a valid cryptographic key.", "AetherDesk", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            // Derive shared AES-256-GCM key
+            session.SetRemotePublicKey(hostPubKey);
+
+            // Connect Viewer to relay
+            string relayUrl = _networkManager.GetRelayUrl(sessionId, "viewer");
+            LogDiagnostic($"Connecting Viewer to relay at {relayUrl}...");
+            try
+            {
+                await session.ConnectRelayAsync(relayUrl);
+            }
+            catch (Exception ex)
+            {
+                _activeViewerSessions.TryRemove(sessionId, out _);
+                session.Dispose();
+                LogDiagnostic($"Relay connection failed: {ex.Message}");
+                MessageBox.Show($"Failed to connect to relay server:\n{ex.Message}", "AetherDesk", MessageBoxButton.OK, MessageBoxImage.Error);
+                return;
+            }
+
+            // Record in database
+            _database.AddRecentSession(new RecentSession
+            {
+                SessionId = sessionId,
+                PartnerId = DeviceIdGenerator.Format(session.PartnerId),
+                PartnerName = $"Remote Device {DeviceIdGenerator.Format(session.PartnerId)}",
+                StartedAtUtc = DateTime.UtcNow
+            });
+            LoadRecentSessions();
+
+            // Open Viewer window
+            var viewerWin = new ViewerWindow(session);
+            viewerWin.Show();
+
+            LogDiagnostic($"Remote desktop session active with partner {DeviceIdGenerator.Format(session.PartnerId)}.");
+            TxtFooterStatus.Text = $"Connected to {DeviceIdGenerator.Format(session.PartnerId)}.";
         });
-        LoadRecentSessions();
-
-        var viewerWin = new ViewerWindow(session);
-        viewerWin.Show();
-
-        LogDiagnostic($"Initiated remote desktop session {sessionId} to partner {DeviceIdGenerator.Format(partnerId)}.");
     }
 
     private void BtnQuickHostTest_Click(object sender, RoutedEventArgs e)
@@ -225,9 +359,17 @@ public partial class MainWindow : Window
         TxtUnattendedStatus.Text = "Unattended access configured (PBKDF2-SHA256)";
     }
 
-    private void BtnSettings_Click(object sender, RoutedEventArgs e)
+    private async void BtnSettings_Click(object sender, RoutedEventArgs e)
     {
-        MessageBox.Show("AetherDesk Settings:\n- Target FPS: 30-60 Adaptive\n- Cryptography: AES-256-GCM + ECDH P-256\n- Compression: 64x64 Tile Deflate Delta\n- Local Database: SQLite WAL Mode\n- Signaling: ws://localhost:5000/ws/signaling", "AetherDesk Settings", MessageBoxButton.OK, MessageBoxImage.Information);
+        var win = new SettingsWindow(_database);
+        win.Owner = this;
+        win.ShowDialog();
+
+        if (win.SettingsSaved)
+        {
+            LogDiagnostic($"Applying new server URL: {win.ServerUrl}");
+            await _networkManager.StartSignalingAsync(win.ServerUrl);
+        }
     }
 
     protected override void OnClosed(EventArgs e)

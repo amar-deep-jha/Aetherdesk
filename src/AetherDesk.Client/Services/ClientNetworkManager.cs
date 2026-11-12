@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -14,14 +15,18 @@ public sealed class ClientNetworkManager : IDisposable
     private readonly DeviceIdentity _identity;
     private readonly DatabaseService _database;
     private ClientWebSocket? _signalingSocket;
-    private readonly CancellationTokenSource _cts = new();
+    private CancellationTokenSource _cts = new();
 
     public DeviceIdentity Identity => _identity;
     public DatabaseService Database => _database;
     public bool IsConnectedToSignaling => _signalingSocket?.State == WebSocketState.Open;
+    public string CurrentSignalingUrl { get; private set; } = "ws://localhost:5000/ws/signaling";
 
     public event Action<bool>? SignalingStateChanged;
-    public event Action<string, string, string, Action<bool>>? IncomingConnectionPrompt; // fromId, sessionId, pubKey, callback
+    // fromId, sessionId, pubKey, callback(approved, hostPubKey)
+    public event Action<string, string, string, Action<bool, string?>>? IncomingConnectionPrompt;
+    // sessionId, accepted, hostPubKey, error
+    public event Action<string, bool, string?, string?>? ConnectResponseReceived;
     public event Action<string>? StatusLogReceived;
 
     public ClientNetworkManager(DeviceIdentity identity, DatabaseService database)
@@ -30,10 +35,26 @@ public sealed class ClientNetworkManager : IDisposable
         _database = database;
     }
 
+    public string GetRelayUrl(string sessionId, string role)
+    {
+        string baseWs = CurrentSignalingUrl.Replace("/ws/signaling", "").TrimEnd('/');
+        return $"{baseWs}/ws/relay/{sessionId}?role={role}";
+    }
+
     public async Task StartSignalingAsync(string serverWsUrl = "ws://localhost:5000/ws/signaling")
     {
         try
         {
+            CurrentSignalingUrl = serverWsUrl;
+
+            // Clean up any existing connection
+            if (_signalingSocket != null)
+            {
+                try { _cts.Cancel(); } catch { }
+                try { _signalingSocket.Dispose(); } catch { }
+            }
+            _cts = new CancellationTokenSource();
+
             _signalingSocket = new ClientWebSocket();
             StatusLogReceived?.Invoke($"Connecting to signaling server at {serverWsUrl}...");
             await _signalingSocket.ConnectAsync(new Uri(serverWsUrl), _cts.Token).ConfigureAwait(false);
@@ -59,6 +80,19 @@ public sealed class ClientNetworkManager : IDisposable
             SignalingStateChanged?.Invoke(false);
             StatusLogReceived?.Invoke($"Signaling connection error: {ex.Message}");
         }
+    }
+
+    public Task SendConnectRequestAsync(string targetId, string sessionId, string callerPublicKey)
+    {
+        var req = new
+        {
+            type = "connect_request",
+            targetId = targetId,
+            fromId = _identity.DeviceId,
+            sessionId = sessionId,
+            publicKey = callerPublicKey
+        };
+        return SendSignalingJsonAsync(req);
     }
 
     private async Task HeartbeatLoopAsync()
@@ -88,44 +122,82 @@ public sealed class ClientNetworkManager : IDisposable
                 if (result.MessageType == WebSocketMessageType.Text && result.Count > 0)
                 {
                     string json = Encoding.UTF8.GetString(buffer, 0, result.Count);
-                    using var doc = JsonDocument.Parse(json);
-                    var root = doc.RootElement;
-
-                    if (root.TryGetProperty("type", out var typeProp))
+                    try
                     {
-                        string type = typeProp.GetString() ?? "";
-                        if (type == "registered")
-                        {
-                            StatusLogReceived?.Invoke($"Device registered successfully as ID: {_identity.FormattedId}");
-                        }
-                        else if (type == "connect_request")
-                        {
-                            string fromId = root.GetProperty("fromId").GetString() ?? "";
-                            string sessionId = root.GetProperty("sessionId").GetString() ?? "";
-                            string pubKey = root.GetProperty("publicKey").GetString() ?? "";
+                        using var doc = JsonDocument.Parse(json);
+                        var root = doc.RootElement;
 
-                            StatusLogReceived?.Invoke($"Incoming connection invitation from {DeviceIdGenerator.Format(fromId)}...");
-
-                            IncomingConnectionPrompt?.Invoke(fromId, sessionId, pubKey, approved =>
+                        if (root.ValueKind == JsonValueKind.String)
+                        {
+                            string unwrapped = root.GetString() ?? "";
+                            if (!string.IsNullOrEmpty(unwrapped))
                             {
-                                _ = SendSignalingJsonAsync(new
-                                {
-                                    type = "connect_response",
-                                    targetId = fromId,
-                                    fromId = _identity.DeviceId,
-                                    sessionId = sessionId,
-                                    accepted = approved
-                                });
-                            });
+                                using var innerDoc = JsonDocument.Parse(unwrapped);
+                                ProcessSignalingMessage(innerDoc.RootElement);
+                                continue;
+                            }
                         }
+
+                        if (root.ValueKind == JsonValueKind.Object)
+                        {
+                            ProcessSignalingMessage(root);
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        StatusLogReceived?.Invoke($"Signaling packet warning: {ex.Message}");
                     }
                 }
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            StatusLogReceived?.Invoke($"Signaling loop terminated: {ex.Message}");
+        }
         finally
         {
             SignalingStateChanged?.Invoke(false);
+        }
+    }
+
+    private void ProcessSignalingMessage(JsonElement root)
+    {
+        if (!root.TryGetProperty("type", out var typeProp)) return;
+        string type = typeProp.GetString() ?? "";
+
+        if (type == "registered")
+        {
+            StatusLogReceived?.Invoke($"Device registered successfully as ID: {_identity.FormattedId}");
+        }
+        else if (type == "connect_request")
+        {
+            string fromId = root.TryGetProperty("fromId", out var f) ? f.GetString() ?? "" : "";
+            string sessionId = root.TryGetProperty("sessionId", out var s) ? s.GetString() ?? "" : "";
+            string pubKey = root.TryGetProperty("publicKey", out var p) ? p.GetString() ?? "" : "";
+
+            StatusLogReceived?.Invoke($"Incoming connection invitation from {DeviceIdGenerator.Format(fromId)}...");
+
+            IncomingConnectionPrompt?.Invoke(fromId, sessionId, pubKey, (approved, hostPubKey) =>
+            {
+                _ = SendSignalingJsonAsync(new
+                {
+                    type = "connect_response",
+                    targetId = fromId,
+                    fromId = _identity.DeviceId,
+                    sessionId = sessionId,
+                    accepted = approved,
+                    publicKey = hostPubKey
+                });
+            });
+        }
+        else if (type == "connect_response")
+        {
+            string sessionId = root.TryGetProperty("sessionId", out var sid) ? sid.GetString() ?? "" : "";
+            bool accepted = root.TryGetProperty("accepted", out var acc) && acc.GetBoolean();
+            string? hostPubKey = root.TryGetProperty("publicKey", out var pk) ? pk.GetString() : null;
+            string? error = root.TryGetProperty("error", out var err) ? err.GetString() : null;
+
+            ConnectResponseReceived?.Invoke(sessionId, accepted, hostPubKey, error);
         }
     }
 

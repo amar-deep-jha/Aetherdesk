@@ -143,7 +143,7 @@ app.Map("/ws/relay/{sessionId}", async (string sessionId, HttpContext context, R
 static async Task SendJsonAsync(WebSocket socket, object payload)
 {
     if (socket.State != WebSocketState.Open) return;
-    byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(payload);
+    byte[] bytes = payload is string str ? Encoding.UTF8.GetBytes(str) : JsonSerializer.SerializeToUtf8Bytes(payload);
     await socket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None);
 }
 

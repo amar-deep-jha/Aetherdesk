@@ -29,11 +29,15 @@
 
                 <!-- Right controls -->
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Button Content="KeyFrame" Click="BtnKeyFrame_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="10,5" Margin="0,0,6,0" Cursor="Hand" />
-                    <Button Content="Fit Screen" Click="BtnFit_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="10,5" Margin="0,0,6,0" Cursor="Hand" />
-                    <Button Content="File Transfer" Click="BtnFileTransfer_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="10,5" Margin="0,0,6,0" Cursor="Hand" />
-                    <Button Content="Chat" Click="BtnToggleChat_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="10,5" Margin="0,0,12,0" Cursor="Hand" />
-                    <Button Content="Disconnect" Click="BtnDisconnect_Click" Background="#EF4444" Foreground="#FFFFFF" FontWeight="SemiBold" BorderThickness="0" Padding="14,6" Cursor="Hand" />
+                    <Button Content="Ctrl+Alt+Del" Click="BtnCtrlAltDel_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" ToolTip="Send Ctrl+Alt+Del to remote computer" />
+                    <Button Content="Win" Click="BtnWinKey_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" ToolTip="Send Windows Key" />
+                    <Button Content="Lock" Click="BtnLock_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" ToolTip="Lock remote workstation" />
+                    <Button Content="Screenshot" Click="BtnScreenshot_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" ToolTip="Save desktop screenshot to Desktop" />
+                    <Button Content="Refresh" Click="BtnKeyFrame_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" ToolTip="Request full keyframe refresh" />
+                    <Button Content="Fit Screen" Click="BtnFit_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" />
+                    <Button Content="Files" Click="BtnFileTransfer_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" />
+                    <Button Content="Chat" Click="BtnToggleChat_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,10,0" Cursor="Hand" />
+                    <Button Content="Disconnect" Click="BtnDisconnect_Click" Background="#EF4444" Foreground="#FFFFFF" FontWeight="SemiBold" BorderThickness="0" Padding="12,5" Cursor="Hand" />
                 </StackPanel>
             </DockPanel>
         </Border>

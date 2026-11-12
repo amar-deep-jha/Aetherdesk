@@ -241,6 +241,44 @@ public static class WindowsInputInjector
         return User32.SendInput(2, new[] { down, up }, InputSize) == 2;
     }
 
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool LockWorkStation();
+
+    public static bool InjectSystemCommand(SystemCommandType command)
+    {
+        switch (command)
+        {
+            case SystemCommandType.WinKey:
+                InjectKeyDown(0x5B, 0, false);
+                InjectKeyUp(0x5B, 0, false);
+                return true;
+
+            case SystemCommandType.LockWorkstation:
+                return LockWorkStation();
+
+            case SystemCommandType.TaskManager:
+                InjectKeyDown(0x11, 0, false);
+                InjectKeyDown(0x10, 0, false);
+                InjectKeyDown(0x1B, 0, false);
+                InjectKeyUp(0x1B, 0, false);
+                InjectKeyUp(0x10, 0, false);
+                InjectKeyUp(0x11, 0, false);
+                return true;
+
+            case SystemCommandType.CtrlAltDel:
+                InjectKeyDown(0x11, 0, false);
+                InjectKeyDown(0x12, 0, false);
+                InjectKeyDown(0x2E, 0, true);
+                InjectKeyUp(0x2E, 0, true);
+                InjectKeyUp(0x12, 0, false);
+                InjectKeyUp(0x11, 0, false);
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
     private static User32.INPUT CreateMouseInput(uint flags, uint mouseData = 0)
     {
         return new User32.INPUT
