@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "name": "aetherdesk",
+  "cleanUrls": true,
+  "headers": [
+    {
+      "source": "/downloads/(.*)",
+      "headers": [
+        {
+          "key": "Content-Disposition",
+          "value": "attachment"
+        }
+      ]
+    }
+  ]
+}
