@@ -3,10 +3,11 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="AetherDesk - Remote Session Viewport" Height="768" Width="1024"
         Background="#0B0F19" WindowStartupLocation="CenterScreen"
-        Focusable="True" KeyDown="Window_KeyDown" KeyUp="Window_KeyUp">
+        Focusable="True" KeyDown="Window_KeyDown" KeyUp="Window_KeyUp"
+        AllowDrop="True" DragOver="Window_DragOver" Drop="Window_Drop">
     <Grid>
         <Grid.RowDefinitions>
-            <RowDefinition Height="48" />
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
         </Grid.RowDefinitions>
         <Grid.ColumnDefinitions>
@@ -14,43 +15,57 @@
             <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
 
-        <!-- Top Session Toolbar -->
-        <Border Grid.Row="0" Grid.ColumnSpan="2" Background="#111827" BorderBrush="#1F2937" BorderThickness="0,0,0,1" Padding="12,0">
+        <!-- Top Edge Trigger for Auto-Hiding Toolbar in Fullscreen -->
+        <Border x:Name="TopHoverTrigger" Grid.Row="0" Grid.ColumnSpan="2" Height="6" Background="Transparent" VerticalAlignment="Top" Panel.ZIndex="100" MouseEnter="TopHoverTrigger_MouseEnter" Visibility="Collapsed" />
+
+        <!-- Top Session Toolbar (Supports Pinned & Auto-Hiding) -->
+        <Border x:Name="PnlTopToolbar" Grid.Row="0" Grid.ColumnSpan="2" Background="#111827" BorderBrush="#1F2937" BorderThickness="0,0,0,1" Padding="12,6" Panel.ZIndex="99" MouseLeave="PnlTopToolbar_MouseLeave">
             <DockPanel VerticalAlignment="Center">
                 <!-- Left session metadata -->
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left" VerticalAlignment="Center">
                     <Ellipse Width="10" Height="10" Fill="#10B981" Margin="0,0,8,0" />
-                    <TextBlock x:Name="TxtPartnerId" Text="Partner: 000 000 000" Foreground="#F3F4F6" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" Margin="0,0,16,0" />
-                    <Border Background="#1F2937" CornerRadius="4" Padding="6,2" Margin="0,0,12,0">
+                    <TextBlock x:Name="TxtPartnerId" Text="Partner: 000 000 000" Foreground="#F3F4F6" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" Margin="0,0,12,0" />
+                    <Border Background="#1F2937" CornerRadius="4" Padding="6,2" Margin="0,0,8,0">
                         <TextBlock Text="E2EE AES-256-GCM" Foreground="#06B6D4" FontSize="11" FontWeight="Medium" />
                     </Border>
-                    <TextBlock x:Name="TxtTelemetry" Text="FPS: 0.0 | 0.0 KB/s" Foreground="#9CA3AF" FontSize="12" VerticalAlignment="Center" />
+                    <TextBlock x:Name="TxtTelemetry" Text="FPS: 0.0 | 0.0 KB/s" Foreground="#9CA3AF" FontSize="12" VerticalAlignment="Center" Margin="0,0,12,0" />
+                    <ComboBox x:Name="CmbMonitors" Background="#1F2937" Foreground="#F3F4F6" BorderBrush="#374151" Padding="6,3" SelectionChanged="CmbMonitors_SelectionChanged" Visibility="Collapsed" ToolTip="Select remote display" />
                 </StackPanel>
 
                 <!-- Right controls -->
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center">
-                    <Button Content="Ctrl+Alt+Del" Click="BtnCtrlAltDel_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" ToolTip="Send Ctrl+Alt+Del to remote computer" />
-                    <Button Content="Win" Click="BtnWinKey_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" ToolTip="Send Windows Key" />
-                    <Button Content="Lock" Click="BtnLock_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" ToolTip="Lock remote workstation" />
-                    <Button Content="Screenshot" Click="BtnScreenshot_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" ToolTip="Save desktop screenshot to Desktop" />
-                    <Button Content="Refresh" Click="BtnKeyFrame_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" ToolTip="Request full keyframe refresh" />
-                    <Button Content="Fit Screen" Click="BtnFit_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" />
-                    <Button Content="Files" Click="BtnFileTransfer_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,4,0" Cursor="Hand" />
-                    <Button Content="Chat" Click="BtnToggleChat_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,5" Margin="0,0,10,0" Cursor="Hand" />
-                    <Button Content="Disconnect" Click="BtnDisconnect_Click" Background="#EF4444" Foreground="#FFFFFF" FontWeight="SemiBold" BorderThickness="0" Padding="12,5" Cursor="Hand" />
+                    <Button Content="Ctrl+Alt+Del" Click="BtnCtrlAltDel_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Send Ctrl+Alt+Del" />
+                    <Button Content="Win" Click="BtnWinKey_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Send Windows Key" />
+                    <Button Content="Lock" Click="BtnLock_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Lock workstation" />
+                    <Button Content="Screenshot" Click="BtnScreenshot_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Save screenshot to Desktop" />
+                    <Button x:Name="BtnDisplayMode" Content="Fit Screen" Click="BtnDisplayMode_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Cycle Display Scaling (Fit / 1:1 Native / Stretch)" />
+                    <Button x:Name="BtnFullScreen" Content="Fullscreen (F11)" Click="BtnFullScreen_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Toggle True Full-Screen Mode (F11)" />
+                    <Button Content="Files" Click="BtnFileTransfer_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Open File Transfer Manager" />
+                    <Button x:Name="BtnToggleChat" Content="Chat" Click="BtnToggleChat_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Open In-Session Chat" />
+                    <Button x:Name="BtnPinToolbar" Content="📌" Click="BtnPinToolbar_Click" Background="#1F2937" Foreground="#9CA3AF" BorderBrush="#374151" Padding="6,4" Margin="0,0,8,0" Cursor="Hand" ToolTip="Pin toolbar in full-screen" />
+                    <Button Content="Disconnect" Click="BtnDisconnect_Click" Background="#EF4444" Foreground="#FFFFFF" FontWeight="SemiBold" BorderThickness="0" Padding="12,4" Cursor="Hand" />
                 </StackPanel>
             </DockPanel>
         </Border>
 
         <!-- Center Remote Display Viewport -->
-        <ScrollViewer Grid.Row="1" Grid.Column="0" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Background="#030712">
+        <ScrollViewer x:Name="SvViewport" Grid.Row="1" Grid.Column="0" HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Auto" Background="#030712">
             <Grid Background="#030712" HorizontalAlignment="Center" VerticalAlignment="Center">
                 <Image x:Name="ImgViewport" Stretch="Uniform"
                        MouseMove="ImgViewport_MouseMove"
                        MouseDown="ImgViewport_MouseDown"
                        MouseUp="ImgViewport_MouseUp"
                        MouseWheel="ImgViewport_MouseWheel"
-                       Cursor="Cross" />
+                       Cursor="Cross"
+                       RenderOptions.BitmapScalingMode="HighQuality" />
+
+                <!-- Drop & Transfer In-Viewport Overlay Notification -->
+                <Border x:Name="PnlDropOverlay" Background="#CC111827" BorderBrush="#06B6D4" BorderThickness="2" CornerRadius="8" Padding="16,10" HorizontalAlignment="Center" VerticalAlignment="Bottom" Margin="0,0,0,24" Visibility="Collapsed">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Text="📁 " FontSize="14" VerticalAlignment="Center" />
+                        <TextBlock x:Name="TxtDropOverlay" Text="Uploading dropped file..." Foreground="#F9FAFB" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
+                    </StackPanel>
+                </Border>
             </Grid>
         </ScrollViewer>
 
@@ -64,16 +79,24 @@
                 </Grid.RowDefinitions>
 
                 <Border Grid.Row="0" Background="#1F2937" Padding="10,0">
-                    <TextBlock Text="In-Session Chat" Foreground="#F3F4F6" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" />
+                    <DockPanel VerticalAlignment="Center">
+                        <TextBlock Text="In-Session Chat" Foreground="#F3F4F6" FontWeight="SemiBold" FontSize="13" VerticalAlignment="Center" DockPanel.Dock="Left" />
+                        <Button Content="✕" Click="BtnCloseChat_Click" Background="Transparent" Foreground="#9CA3AF" BorderThickness="0" DockPanel.Dock="Right" HorizontalAlignment="Right" Cursor="Hand" />
+                    </DockPanel>
                 </Border>
 
                 <ListBox x:Name="LstChat" Grid.Row="1" Background="Transparent" BorderThickness="0" Foreground="#E5E7EB" Margin="8">
                     <ListBox.ItemTemplate>
                         <DataTemplate>
-                            <StackPanel Margin="0,4">
-                                <TextBlock Text="{Binding SenderName}" Foreground="#06B6D4" FontSize="11" FontWeight="SemiBold" />
-                                <TextBlock Text="{Binding Text}" Foreground="#F9FAFB" FontSize="13" TextWrapping="Wrap" />
-                            </StackPanel>
+                            <Border Background="#1F2937" CornerRadius="4" Padding="8,6" Margin="0,3">
+                                <StackPanel>
+                                    <DockPanel>
+                                        <TextBlock Text="{Binding SenderName}" Foreground="#06B6D4" FontSize="11" FontWeight="SemiBold" DockPanel.Dock="Left" />
+                                        <TextBlock Text="{Binding FormattedTime}" Foreground="#6B7280" FontSize="10" DockPanel.Dock="Right" HorizontalAlignment="Right" />
+                                    </DockPanel>
+                                    <TextBlock Text="{Binding Text}" Foreground="#F9FAFB" FontSize="13" TextWrapping="Wrap" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Border>
                         </DataTemplate>
                     </ListBox.ItemTemplate>
                 </ListBox>

@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using AetherDesk.Host.Monitors;
 using AetherDesk.Host.Native;
 
 namespace AetherDesk.Host.Capture;
@@ -38,10 +39,22 @@ public sealed class GdiScreenCapturer : IScreenCapturer
 
         try
         {
-            _left = User32.GetSystemMetrics(User32.SM_XVIRTUALSCREEN);
-            _top = User32.GetSystemMetrics(User32.SM_YVIRTUALSCREEN);
-            _width = User32.GetSystemMetrics(User32.SM_CXVIRTUALSCREEN);
-            _height = User32.GetSystemMetrics(User32.SM_CYVIRTUALSCREEN);
+            var monitors = MonitorManager.EnumerateMonitors();
+            if (monitorIndex >= 0 && monitorIndex < monitors.Count)
+            {
+                var mon = monitors[monitorIndex];
+                _left = mon.Left;
+                _top = mon.Top;
+                _width = mon.Width;
+                _height = mon.Height;
+            }
+            else
+            {
+                _left = User32.GetSystemMetrics(User32.SM_XVIRTUALSCREEN);
+                _top = User32.GetSystemMetrics(User32.SM_YVIRTUALSCREEN);
+                _width = User32.GetSystemMetrics(User32.SM_CXVIRTUALSCREEN);
+                _height = User32.GetSystemMetrics(User32.SM_CYVIRTUALSCREEN);
+            }
         }
         catch { }
 

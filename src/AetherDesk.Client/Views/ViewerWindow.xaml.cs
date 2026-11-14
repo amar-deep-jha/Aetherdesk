@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
+using System.Security.Cryptography;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -9,6 +10,7 @@ using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using AetherDesk.Client.Services;
 using AetherDesk.Core.Identity;
+using AetherDesk.Core.Protocol;
 using AetherDesk.Core.Protocol.Messages;
 
 namespace AetherDesk.Client.Views;
@@ -19,7 +21,18 @@ public partial class ViewerWindow : Window
     private WriteableBitmap? _bitmap;
     private byte[] _tileScratchBuffer = new byte[256 * 256 * 4];
     private readonly DispatcherTimer _hudTimer;
+    private readonly DispatcherTimer _clipboardTimer;
     private readonly ObservableCollection<ChatMessageMsg> _chatMessages = new();
+
+    private bool _isFullScreen;
+    private WindowStyle _previousStyle = WindowStyle.SingleBorderWindow;
+    private WindowState _previousState = WindowState.Normal;
+    private ResizeMode _previousResizeMode = ResizeMode.CanResize;
+    private bool _isToolbarPinned;
+    private int _displayModeIndex = 0; // 0: Fit (Uniform), 1: 1:1 Native (None), 2: Stretch (Fill)
+    private string _lastLocalClipboard = string.Empty;
+    private int _unreadChatCount = 0;
+    private long _lastMouseMoveTick;
 
     public ViewerWindow(ViewerSession session)
     {
@@ -33,17 +46,25 @@ public partial class ViewerWindow : Window
         _session.FrameReady += OnFrameReady;
         _session.TileRendered += OnTileRendered;
         _session.ChatMessageReceived += OnChatMessageReceived;
+        _session.MonitorListReceived += OnMonitorListReceived;
+        _session.ClipboardReceived += OnRemoteClipboardReceived;
         _session.SessionDisconnected += OnSessionDisconnected;
 
         // Initialize bitmap with default size
         InitBitmap(session.Width, session.Height);
 
+        // Telemetry HUD timer
         _hudTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _hudTimer.Tick += (s, e) =>
         {
             TxtTelemetry.Text = $"FPS: {_session.CurrentFps:F1} | {_session.BandwidthKbps:F1} Kbps";
         };
         _hudTimer.Start();
+
+        // Clipboard Sync Timer
+        _clipboardTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _clipboardTimer.Tick += (s, e) => CheckLocalClipboard();
+        _clipboardTimer.Start();
     }
 
     private void InitBitmap(int width, int height)
@@ -104,7 +125,79 @@ public partial class ViewerWindow : Window
 
     private void OnChatMessageReceived(ChatMessageMsg msg)
     {
-        Dispatcher.Invoke(() => _chatMessages.Add(msg));
+        Dispatcher.Invoke(() =>
+        {
+            _chatMessages.Add(msg);
+            if (ChatSidebar.Visibility != Visibility.Visible)
+            {
+                _unreadChatCount++;
+                BtnToggleChat.Content = $"Chat ({_unreadChatCount})";
+                BtnToggleChat.Background = new SolidColorBrush(Color.FromRgb(6, 182, 212));
+            }
+        });
+    }
+
+    private void OnMonitorListReceived(List<MonitorInfoMsg> monitors)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            if (monitors == null || monitors.Count == 0) return;
+
+            CmbMonitors.Items.Clear();
+            var allItem = new ComboBoxItem { Content = "All Displays", Tag = -1 };
+            CmbMonitors.Items.Add(allItem);
+
+            foreach (var m in monitors)
+            {
+                var item = new ComboBoxItem
+                {
+                    Content = $"{m.DeviceName} ({m.Width}x{m.Height})",
+                    Tag = m.Index
+                };
+                CmbMonitors.Items.Add(item);
+            }
+
+            CmbMonitors.SelectedIndex = monitors.Count > 1 ? 1 : 0;
+            CmbMonitors.Visibility = Visibility.Visible;
+        });
+    }
+
+    private void CmbMonitors_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (CmbMonitors.SelectedItem is ComboBoxItem item && item.Tag is int idx)
+        {
+            _ = _session.SelectMonitorAsync(idx);
+        }
+    }
+
+    private void CheckLocalClipboard()
+    {
+        try
+        {
+            if (Clipboard.ContainsText())
+            {
+                string current = Clipboard.GetText();
+                if (!string.IsNullOrEmpty(current) && current != _lastLocalClipboard)
+                {
+                    _lastLocalClipboard = current;
+                    _ = _session.SendClipboardSyncAsync(current);
+                }
+            }
+        }
+        catch { }
+    }
+
+    private void OnRemoteClipboardReceived(string text)
+    {
+        Dispatcher.Invoke(() =>
+        {
+            try
+            {
+                _lastLocalClipboard = text; // avoid echo!
+                Clipboard.SetText(text);
+            }
+            catch { }
+        });
     }
 
     private void OnSessionDisconnected(string reason)
@@ -116,7 +209,83 @@ public partial class ViewerWindow : Window
         });
     }
 
-    private long _lastMouseMoveTick;
+    public void ToggleFullScreen()
+    {
+        if (!_isFullScreen)
+        {
+            _previousStyle = WindowStyle;
+            _previousState = WindowState;
+            _previousResizeMode = ResizeMode;
+
+            WindowStyle = WindowStyle.None;
+            ResizeMode = ResizeMode.NoResize;
+            WindowState = WindowState.Normal;
+            WindowState = WindowState.Maximized;
+            _isFullScreen = true;
+
+            TopHoverTrigger.Visibility = Visibility.Visible;
+            if (!_isToolbarPinned)
+            {
+                PnlTopToolbar.Visibility = Visibility.Collapsed;
+            }
+            BtnFullScreen.Content = "Exit Full (F11)";
+        }
+        else
+        {
+            WindowStyle = _previousStyle;
+            ResizeMode = _previousResizeMode;
+            WindowState = _previousState;
+            _isFullScreen = false;
+
+            TopHoverTrigger.Visibility = Visibility.Collapsed;
+            PnlTopToolbar.Visibility = Visibility.Visible;
+            BtnFullScreen.Content = "Fullscreen (F11)";
+        }
+    }
+
+    private void BtnFullScreen_Click(object sender, RoutedEventArgs e) => ToggleFullScreen();
+
+    private void TopHoverTrigger_MouseEnter(object sender, MouseEventArgs e)
+    {
+        if (_isFullScreen)
+        {
+            PnlTopToolbar.Visibility = Visibility.Visible;
+        }
+    }
+
+    private void PnlTopToolbar_MouseLeave(object sender, MouseEventArgs e)
+    {
+        if (_isFullScreen && !_isToolbarPinned)
+        {
+            PnlTopToolbar.Visibility = Visibility.Collapsed;
+        }
+    }
+
+    private void BtnPinToolbar_Click(object sender, RoutedEventArgs e)
+    {
+        _isToolbarPinned = !_isToolbarPinned;
+        BtnPinToolbar.Foreground = _isToolbarPinned ? new SolidColorBrush(Color.FromRgb(6, 182, 212)) : new SolidColorBrush(Color.FromRgb(156, 163, 175));
+    }
+
+    private void BtnDisplayMode_Click(object sender, RoutedEventArgs e)
+    {
+        _displayModeIndex = (_displayModeIndex + 1) % 3;
+        switch (_displayModeIndex)
+        {
+            case 0:
+                ImgViewport.Stretch = Stretch.Uniform;
+                BtnDisplayMode.Content = "Fit Screen";
+                break;
+            case 1:
+                ImgViewport.Stretch = Stretch.None;
+                BtnDisplayMode.Content = "1:1 Native";
+                break;
+            case 2:
+                ImgViewport.Stretch = Stretch.Fill;
+                BtnDisplayMode.Content = "Stretch";
+                break;
+        }
+    }
 
     private void ImgViewport_MouseMove(object sender, MouseEventArgs e)
     {
@@ -167,6 +336,22 @@ public partial class ViewerWindow : Window
     private void Window_KeyDown(object sender, KeyEventArgs e)
     {
         if (TxtChatInput.IsFocused) return;
+
+        // Full-screen toggle shortcuts
+        if (e.Key == Key.F11 || (e.Key == Key.F && (Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt)) == (ModifierKeys.Control | ModifierKeys.Alt)))
+        {
+            ToggleFullScreen();
+            e.Handled = true;
+            return;
+        }
+
+        if (e.Key == Key.Escape && _isFullScreen)
+        {
+            ToggleFullScreen();
+            e.Handled = true;
+            return;
+        }
+
         int vk = KeyInterop.VirtualKeyFromKey(e.Key);
         _ = _session.SendKeyDownAsync((ushort)vk, 0, false);
     }
@@ -220,20 +405,6 @@ public partial class ViewerWindow : Window
         _ = _session.RequestKeyFrameAsync();
     }
 
-    private void BtnFit_Click(object sender, RoutedEventArgs e)
-    {
-        if (ImgViewport.Stretch == Stretch.Uniform)
-        {
-            ImgViewport.Stretch = Stretch.None;
-            ((Button)sender).Content = "1:1 Native";
-        }
-        else
-        {
-            ImgViewport.Stretch = Stretch.Uniform;
-            ((Button)sender).Content = "Fit Screen";
-        }
-    }
-
     private void BtnFileTransfer_Click(object sender, RoutedEventArgs e)
     {
         var ftWin = new FileTransferWindow(_session);
@@ -243,9 +414,22 @@ public partial class ViewerWindow : Window
 
     private void BtnToggleChat_Click(object sender, RoutedEventArgs e)
     {
-        ChatSidebar.Visibility = ChatSidebar.Visibility == Visibility.Visible
-            ? Visibility.Collapsed
-            : Visibility.Visible;
+        if (ChatSidebar.Visibility == Visibility.Visible)
+        {
+            ChatSidebar.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            ChatSidebar.Visibility = Visibility.Visible;
+            _unreadChatCount = 0;
+            BtnToggleChat.Content = "Chat";
+            BtnToggleChat.Background = new SolidColorBrush(Color.FromRgb(31, 41, 55));
+        }
+    }
+
+    private void BtnCloseChat_Click(object sender, RoutedEventArgs e)
+    {
+        ChatSidebar.Visibility = Visibility.Collapsed;
     }
 
     private void BtnSendChat_Click(object sender, RoutedEventArgs e)
@@ -278,6 +462,99 @@ public partial class ViewerWindow : Window
         _ = _session.SendChatMessageAsync(text);
     }
 
+    private void Window_DragOver(object sender, DragEventArgs e)
+    {
+        if (e.Data.GetDataPresent(DataFormats.FileDrop))
+        {
+            e.Effects = DragDropEffects.Copy;
+            e.Handled = true;
+        }
+        else
+        {
+            e.Effects = DragDropEffects.None;
+        }
+    }
+
+    private async void Window_Drop(object sender, DragEventArgs e)
+    {
+        if (!e.Data.GetDataPresent(DataFormats.FileDrop)) return;
+        string[]? files = (string[])e.Data.GetData(DataFormats.FileDrop);
+        if (files == null || files.Length == 0) return;
+
+        e.Handled = true;
+        await UploadDroppedFilesAsync(files);
+    }
+
+    private async Task UploadDroppedFilesAsync(string[] filePaths)
+    {
+        PnlDropOverlay.Visibility = Visibility.Visible;
+
+        foreach (var file in filePaths)
+        {
+            if (!File.Exists(file)) continue;
+
+            string fileName = Path.GetFileName(file);
+            long totalSize = new FileInfo(file).Length;
+            TxtDropOverlay.Text = $"Hashing {fileName}...";
+
+            try
+            {
+                byte[] fileBytes = await File.ReadAllBytesAsync(file);
+                string sha256 = Convert.ToHexString(SHA256.HashData(fileBytes));
+                string transferId = Guid.NewGuid().ToString("N");
+
+                var initMsg = new FileTransferInitMsg
+                {
+                    TransferId = transferId,
+                    FileName = fileName,
+                    DestinationDirectory = "", // default to remote desktop
+                    TotalSize = totalSize,
+                    Sha256Hash = sha256,
+                    Direction = FileTransferDirection.Upload
+                };
+
+                await _session.SendPacketAsync(AdbpOpCode.FileTransferInit, initMsg.Serialize());
+
+                const int chunkSize = 32 * 1024;
+                long offset = 0;
+                long seq = 0;
+
+                while (offset < totalSize)
+                {
+                    int currentChunk = (int)Math.Min(chunkSize, totalSize - offset);
+                    byte[] chunkBytes = new byte[currentChunk];
+                    Buffer.BlockCopy(fileBytes, (int)offset, chunkBytes, 0, currentChunk);
+
+                    var chunkMsg = new FileTransferChunkMsg
+                    {
+                        TransferId = transferId,
+                        ChunkIndex = seq++,
+                        Offset = offset,
+                        DataBase64 = Convert.ToBase64String(chunkBytes),
+                        IsLastChunk = (offset + currentChunk >= totalSize)
+                    };
+
+                    await _session.SendPacketAsync(AdbpOpCode.FileTransferChunk, chunkMsg.Serialize());
+                    offset += currentChunk;
+
+                    int progress = (int)((double)offset * 100 / Math.Max(1, totalSize));
+                    TxtDropOverlay.Text = $"Uploading {fileName} ({progress}%)...";
+                    await Task.Delay(3);
+                }
+
+                TxtDropOverlay.Text = $"Uploaded {fileName} to remote host!";
+            }
+            catch (Exception ex)
+            {
+                TxtDropOverlay.Text = $"Upload failed for {fileName}: {ex.Message}";
+            }
+
+            await Task.Delay(1200);
+        }
+
+        PnlDropOverlay.Visibility = Visibility.Collapsed;
+    }
+
     private void BtnDisconnect_Click(object sender, RoutedEventArgs e)
     {
         _session.Disconnect();
@@ -287,6 +564,14 @@ public partial class ViewerWindow : Window
     protected override void OnClosed(EventArgs e)
     {
         _hudTimer.Stop();
+        _clipboardTimer.Stop();
+        _session.ResolutionChanged -= OnResolutionChanged;
+        _session.FrameReady -= OnFrameReady;
+        _session.TileRendered -= OnTileRendered;
+        _session.ChatMessageReceived -= OnChatMessageReceived;
+        _session.MonitorListReceived -= OnMonitorListReceived;
+        _session.ClipboardReceived -= OnRemoteClipboardReceived;
+        _session.SessionDisconnected -= OnSessionDisconnected;
         _session.Dispose();
         base.OnClosed(e);
     }

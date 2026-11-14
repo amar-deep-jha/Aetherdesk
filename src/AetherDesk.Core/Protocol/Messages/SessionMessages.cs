@@ -20,6 +20,9 @@ public sealed class ChatMessageMsg
     [JsonPropertyName("ts")]
     public long TimestampEpochMs { get; set; } = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
+    [JsonIgnore]
+    public string FormattedTime => DateTimeOffset.FromUnixTimeMilliseconds(TimestampEpochMs).ToLocalTime().ToString("HH:mm:ss");
+
     public byte[] Serialize() => JsonSerializer.SerializeToUtf8Bytes(this);
     public static ChatMessageMsg? Deserialize(ReadOnlySpan<byte> bytes) => JsonSerializer.Deserialize<ChatMessageMsg>(bytes);
 }

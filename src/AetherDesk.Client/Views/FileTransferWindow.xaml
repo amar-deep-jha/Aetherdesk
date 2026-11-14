@@ -56,8 +56,10 @@
 
             <!-- Transfer Transfer Actions -->
             <StackPanel Grid.Column="1" VerticalAlignment="Center" HorizontalAlignment="Center">
-                <Button Content="Upload ->" Click="BtnUpload_Click" Background="#06B6D4" Foreground="#FFFFFF" FontWeight="SemiBold" BorderThickness="0" Padding="8,8" Margin="0,0,0,12" Cursor="Hand" />
-                <Button Content="Refresh" Click="BtnRefresh_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,6" Cursor="Hand" />
+                <Button Content="Upload ->" Click="BtnUpload_Click" Background="#06B6D4" Foreground="#FFFFFF" FontWeight="SemiBold" BorderThickness="0" Padding="8,8" Margin="0,0,0,8" Cursor="Hand" ToolTip="Upload selected local file to remote directory" />
+                <Button Content="&lt;- Download" Click="BtnDownload_Click" Background="#3B82F6" Foreground="#FFFFFF" FontWeight="SemiBold" BorderThickness="0" Padding="8,8" Margin="0,0,0,12" Cursor="Hand" ToolTip="Download selected remote file to local directory" />
+                <Button Content="Refresh" Click="BtnRefresh_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="8,6" Margin="0,0,0,8" Cursor="Hand" />
+                <Button x:Name="BtnCancelTransfer" Content="Cancel" Click="BtnCancelTransfer_Click" Background="#374151" Foreground="#EF4444" BorderThickness="0" Padding="8,6" Cursor="Hand" Visibility="Collapsed" />
             </StackPanel>
 
             <!-- Remote File System -->

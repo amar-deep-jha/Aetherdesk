@@ -4,6 +4,7 @@ using AetherDesk.Client.Services;
 using AetherDesk.Core.Protocol;
 using AetherDesk.Core.Protocol.Messages;
 using AetherDesk.Host.Capture;
+using AetherDesk.Host.Input;
 using AetherDesk.Host.Session;
 
 namespace AetherDesk.E2E.Tests;
@@ -158,5 +159,132 @@ public class FullSessionE2ETests
         host.SendChatMessage("Hello Technician! I need help with my display.");
         Assert.NotNull(receivedByViewer);
         Assert.Equal("Hello Technician! I need help with my display.", receivedByViewer.Text);
+    }
+
+    [Fact]
+    public void E2E_InSessionChat_UnicodeAndEmojiSupport()
+    {
+        var msg = new ChatMessageMsg
+        {
+            SenderId = "HOST",
+            SenderName = "Amar Deep",
+            Text = "Testing Unicode: नमस्ते こんにちは 🚀 — Remote PC Operations Verified!",
+            TimestampEpochMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()
+        };
+
+        byte[] bytes = msg.Serialize();
+        var unpacked = ChatMessageMsg.Deserialize(bytes);
+
+        Assert.NotNull(unpacked);
+        Assert.Equal(msg.Text, unpacked.Text);
+        Assert.False(string.IsNullOrEmpty(unpacked.FormattedTime));
+    }
+
+    [Fact]
+    public void E2E_HostAndViewer_FullBidirectionalFileTransfer()
+    {
+        string tempDir = Path.Combine(Path.GetTempPath(), "AetherDesk_E2E_" + Guid.NewGuid().ToString("N")[..8]);
+        Directory.CreateDirectory(tempDir);
+
+        try
+        {
+            using var host = new HostSessionCoordinator();
+            host.Initialize();
+
+            var viewer = new ViewerSession("395253222", "sess-test-ft");
+
+            var hsReq = new HandshakeRequest
+            {
+                DeviceId = "111222333",
+                EphemeralPublicKeyBase64 = viewer.GetLocalPublicKeyBase64()
+            };
+            var hsResp = host.HandleHandshake(hsReq);
+            viewer.SetRemotePublicKey(hsResp.EphemeralPublicKeyBase64);
+
+            FileTransferAckMsg? lastAck = null;
+            viewer.FileTransferAckReceived += ack => lastAck = ack;
+
+            // Pipe Host -> Viewer
+            host.OutgoingPacketReady += packet =>
+            {
+                byte[] bytes = packet.Serialize();
+                viewer.ProcessIncomingPacketBytes(bytes);
+            };
+
+            host.ApproveSession(SessionPermissions.All);
+
+            // Test payload
+            byte[] filePayload = new byte[64 * 1024];
+            Random.Shared.NextBytes(filePayload);
+            string fileHash = Convert.ToHexString(SHA256.HashData(filePayload));
+            string transferId = Guid.NewGuid().ToString("N");
+            string testFileName = "test_e2e_document.bin";
+
+            // 1. Viewer sends FileTransferInit
+            var initMsg = new FileTransferInitMsg
+            {
+                TransferId = transferId,
+                FileName = testFileName,
+                DestinationDirectory = tempDir,
+                TotalSize = filePayload.Length,
+                Sha256Hash = fileHash,
+                Direction = FileTransferDirection.Upload
+            };
+
+            // In local test pipe: pass packet into host
+            var initPacket = new AdbpPacket(AdbpOpCode.FileTransferInit, initMsg.Serialize(), AdbpFlags.None);
+            host.HandleIncomingPacket(initPacket);
+
+            // 2. Viewer sends Chunks
+            int offset = 0;
+            long seq = 0;
+            const int chunkSize = 32 * 1024;
+
+            while (offset < filePayload.Length)
+            {
+                int curr = Math.Min(chunkSize, filePayload.Length - offset);
+                byte[] chunk = new byte[curr];
+                Buffer.BlockCopy(filePayload, offset, chunk, 0, curr);
+
+                var chunkMsg = new FileTransferChunkMsg
+                {
+                    TransferId = transferId,
+                    ChunkIndex = seq++,
+                    Offset = offset,
+                    DataBase64 = Convert.ToBase64String(chunk),
+                    IsLastChunk = (offset + curr >= filePayload.Length)
+                };
+
+                var chunkPacket = new AdbpPacket(AdbpOpCode.FileTransferChunk, chunkMsg.Serialize(), AdbpFlags.None);
+                host.HandleIncomingPacket(chunkPacket);
+                offset += curr;
+            }
+
+            // Verify file was written to disk and verified
+            string expectedPath = Path.Combine(tempDir, testFileName);
+            Assert.True(File.Exists(expectedPath), "File should be created by host.");
+
+            byte[] writtenBytes = File.ReadAllBytes(expectedPath);
+            Assert.Equal(filePayload.Length, writtenBytes.Length);
+            Assert.Equal(fileHash, Convert.ToHexString(SHA256.HashData(writtenBytes)));
+
+            Assert.NotNull(lastAck);
+            Assert.True(lastAck.Success, "Host should have acknowledged transfer success.");
+        }
+        finally
+        {
+            try { Directory.Delete(tempDir, true); } catch { }
+        }
+    }
+
+    [Fact]
+    public void E2E_SystemCommands_InjectsCorrectly()
+    {
+        // Testing that injecting system commands completes without throwing
+        bool cadResult = WindowsInputInjector.InjectSystemCommand(SystemCommandType.CtrlAltDel);
+        bool winResult = WindowsInputInjector.InjectSystemCommand(SystemCommandType.WinKey);
+        bool taskMgrResult = WindowsInputInjector.InjectSystemCommand(SystemCommandType.TaskManager);
+
+        Assert.True(cadResult || winResult || taskMgrResult);
     }
 }

@@ -1,6 +1,8 @@
 using System.Buffers;
+using System.Collections.Concurrent;
 using System.IO;
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using AetherDesk.Core.Identity;
 using AetherDesk.Core.Protocol;
 using AetherDesk.Core.Protocol.Messages;
@@ -8,6 +10,7 @@ using AetherDesk.Core.Security;
 using AetherDesk.Host.Capture;
 using AetherDesk.Host.Clipboard;
 using AetherDesk.Host.Input;
+using AetherDesk.Host.Monitors;
 
 namespace AetherDesk.Host.Session;
 
@@ -28,8 +31,28 @@ public sealed class HostSessionCoordinator : IDisposable
 
     private readonly CancellationTokenSource _cts = new();
     private Task? _streamingTask;
+    private Task? _clipboardSyncTask;
+    private string _lastSyncedClipboard = string.Empty;
     private uint _frameCounter;
     private bool _requestKeyFrame = true;
+
+    private sealed class HostFileTransferState : IDisposable
+    {
+        public string TransferId { get; set; } = string.Empty;
+        public string SafeFilePath { get; set; } = string.Empty;
+        public long TotalSize { get; set; }
+        public string ExpectedSha256 { get; set; } = string.Empty;
+        public FileStream? Stream { get; set; }
+        public long BytesWritten { get; set; }
+
+        public void Dispose()
+        {
+            Stream?.Dispose();
+            Stream = null;
+        }
+    }
+
+    private readonly ConcurrentDictionary<string, HostFileTransferState> _incomingTransfers = new();
 
     public HostSessionState State { get; private set; } = HostSessionState.Idle;
     public SessionPermissions Permissions { get; set; } = SessionPermissions.All;
@@ -39,6 +62,7 @@ public sealed class HostSessionCoordinator : IDisposable
     public event Action<AdbpPacket>? OutgoingPacketReady;
     public event Action<string, Action<bool, SessionPermissions>>? AttendedApprovalRequested;
     public event Action<ChatMessageMsg>? ChatMessageReceived;
+    public event Action<string>? FileTransferStatusChanged;
     public event Action<string>? SessionTerminated;
 
     public HostSessionCoordinator(IScreenCapturer? capturer = null)
@@ -103,8 +127,20 @@ public sealed class HostSessionCoordinator : IDisposable
         };
         SendEncrypted(AdbpOpCode.ScreenResolution, resMsg.Serialize());
 
+        // Broadcast available displays
+        try
+        {
+            var monitors = MonitorManager.EnumerateMonitors();
+            var monListMsg = new MonitorListMsg { Monitors = monitors };
+            SendEncrypted(AdbpOpCode.MonitorList, monListMsg.Serialize());
+        }
+        catch { }
+
         // Start capture loop
         _streamingTask = Task.Run(CaptureAndStreamLoopAsync);
+
+        // Start clipboard sync loop
+        _clipboardSyncTask = Task.Run(ClipboardSyncLoopAsync);
     }
 
     /// <summary>
@@ -214,6 +250,7 @@ public sealed class HostSessionCoordinator : IDisposable
                     var clip = ClipboardSyncMsg.Deserialize(payload);
                     if (clip != null && !string.IsNullOrEmpty(clip.Text))
                     {
+                        _lastSyncedClipboard = clip.Text;
                         ClipboardManager.SetText(clip.Text);
                     }
                 }
@@ -231,11 +268,27 @@ public sealed class HostSessionCoordinator : IDisposable
                 _requestKeyFrame = true;
                 break;
 
+            case AdbpOpCode.SelectMonitor:
+                HandleSelectMonitor(payload);
+                break;
+
             case AdbpOpCode.FileBrowseRequest:
                 if (Permissions.HasFlag(SessionPermissions.AllowFileTransfer))
                 {
                     HandleFileBrowse(payload);
                 }
+                break;
+
+            case AdbpOpCode.FileTransferInit:
+                HandleFileTransferInit(payload);
+                break;
+
+            case AdbpOpCode.FileTransferChunk:
+                HandleFileTransferChunk(payload);
+                break;
+
+            case AdbpOpCode.FileTransferCancel:
+                HandleFileTransferCancel(payload);
                 break;
 
             case AdbpOpCode.SessionControl:
@@ -297,6 +350,254 @@ public sealed class HostSessionCoordinator : IDisposable
         }
 
         SendEncrypted(AdbpOpCode.FileBrowseResponse, resp.Serialize());
+    }
+
+    private void HandleSelectMonitor(ReadOnlySpan<byte> payload)
+    {
+        var sel = SelectMonitorMsg.Deserialize(payload);
+        if (sel == null) return;
+
+        _capturer.Initialize(sel.MonitorIndex);
+        var resMsg = new ScreenResolutionMsg
+        {
+            MonitorIndex = _capturer.MonitorIndex,
+            Width = _capturer.Width,
+            Height = _capturer.Height,
+            Dpi = 96
+        };
+        SendEncrypted(AdbpOpCode.ScreenResolution, resMsg.Serialize());
+        _requestKeyFrame = true;
+    }
+
+    private void HandleFileTransferInit(ReadOnlySpan<byte> payload)
+    {
+        if (!Permissions.HasFlag(SessionPermissions.AllowFileTransfer))
+        {
+            var deniedAck = new FileTransferAckMsg { Success = false, Error = "File transfer permission denied by host." };
+            SendEncrypted(AdbpOpCode.FileTransferAck, deniedAck.Serialize());
+            return;
+        }
+
+        var init = FileTransferInitMsg.Deserialize(payload);
+        if (init == null) return;
+
+        if (init.Direction == FileTransferDirection.Upload)
+        {
+            try
+            {
+                string safeFileName = Path.GetFileName(init.FileName);
+                if (string.IsNullOrWhiteSpace(safeFileName))
+                    safeFileName = $"Transfer_{init.TransferId[..8]}.dat";
+
+                string targetDir = init.DestinationDirectory;
+                if (string.IsNullOrWhiteSpace(targetDir) || !Directory.Exists(targetDir))
+                {
+                    targetDir = Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory);
+                    if (!Directory.Exists(targetDir))
+                        targetDir = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+                }
+
+                string fullPath = Path.Combine(targetDir, safeFileName);
+                if (File.Exists(fullPath))
+                {
+                    string nameWithoutExt = Path.GetFileNameWithoutExtension(safeFileName);
+                    string ext = Path.GetExtension(safeFileName);
+                    fullPath = Path.Combine(targetDir, $"{nameWithoutExt}_{DateTime.Now:yyyyMMddHHmmss}{ext}");
+                }
+
+                var stream = new FileStream(fullPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                var state = new HostFileTransferState
+                {
+                    TransferId = init.TransferId,
+                    SafeFilePath = fullPath,
+                    TotalSize = init.TotalSize,
+                    ExpectedSha256 = init.Sha256Hash,
+                    Stream = stream
+                };
+
+                _incomingTransfers[init.TransferId] = state;
+
+                var ack = new FileTransferAckMsg { TransferId = init.TransferId, ChunkIndex = 0, Success = true };
+                SendEncrypted(AdbpOpCode.FileTransferAck, ack.Serialize());
+
+                FileTransferStatusChanged?.Invoke($"Receiving file: {Path.GetFileName(fullPath)} ({init.TotalSize / 1024} KB)");
+            }
+            catch (Exception ex)
+            {
+                var errAck = new FileTransferAckMsg { TransferId = init.TransferId, Success = false, Error = ex.Message };
+                SendEncrypted(AdbpOpCode.FileTransferAck, errAck.Serialize());
+            }
+        }
+        else if (init.Direction == FileTransferDirection.Download)
+        {
+            _ = Task.Run(() => StreamFileToViewerAsync(init));
+        }
+    }
+
+    private async Task StreamFileToViewerAsync(FileTransferInitMsg req)
+    {
+        try
+        {
+            string remotePath = req.FileName;
+            if (string.IsNullOrWhiteSpace(remotePath) || !File.Exists(remotePath))
+            {
+                var errAck = new FileTransferAckMsg { TransferId = req.TransferId, Success = false, Error = "File not found on host." };
+                SendEncrypted(AdbpOpCode.FileTransferAck, errAck.Serialize());
+                return;
+            }
+
+            var fileInfo = new FileInfo(remotePath);
+            long totalSize = fileInfo.Length;
+            byte[] fileBytes = await File.ReadAllBytesAsync(remotePath);
+            string sha256 = Convert.ToHexString(SHA256.HashData(fileBytes));
+
+            var initMsg = new FileTransferInitMsg
+            {
+                TransferId = req.TransferId,
+                FileName = fileInfo.Name,
+                DestinationDirectory = req.DestinationDirectory,
+                TotalSize = totalSize,
+                Sha256Hash = sha256,
+                Direction = FileTransferDirection.Download
+            };
+            SendEncrypted(AdbpOpCode.FileTransferInit, initMsg.Serialize());
+
+            const int chunkSize = 32 * 1024;
+            long offset = 0;
+            long seq = 0;
+
+            while (offset < totalSize && State == HostSessionState.Active)
+            {
+                int currentChunk = (int)Math.Min(chunkSize, totalSize - offset);
+                byte[] chunkBytes = new byte[currentChunk];
+                Buffer.BlockCopy(fileBytes, (int)offset, chunkBytes, 0, currentChunk);
+
+                var chunkMsg = new FileTransferChunkMsg
+                {
+                    TransferId = req.TransferId,
+                    ChunkIndex = seq++,
+                    Offset = offset,
+                    DataBase64 = Convert.ToBase64String(chunkBytes),
+                    IsLastChunk = (offset + currentChunk >= totalSize)
+                };
+
+                SendEncrypted(AdbpOpCode.FileTransferChunk, chunkMsg.Serialize());
+                offset += currentChunk;
+
+                await Task.Delay(3);
+            }
+
+            FileTransferStatusChanged?.Invoke($"Sent file: {fileInfo.Name} ({totalSize / 1024} KB)");
+        }
+        catch (Exception ex)
+        {
+            var errAck = new FileTransferAckMsg { TransferId = req.TransferId, Success = false, Error = ex.Message };
+            SendEncrypted(AdbpOpCode.FileTransferAck, errAck.Serialize());
+        }
+    }
+
+    private void HandleFileTransferChunk(ReadOnlySpan<byte> payload)
+    {
+        var chunk = FileTransferChunkMsg.Deserialize(payload);
+        if (chunk == null) return;
+
+        if (!_incomingTransfers.TryGetValue(chunk.TransferId, out var state) || state.Stream == null)
+            return;
+
+        try
+        {
+            byte[] chunkBytes = Convert.FromBase64String(chunk.DataBase64);
+            state.Stream.Write(chunkBytes, 0, chunkBytes.Length);
+            state.BytesWritten += chunkBytes.Length;
+
+            if (chunk.IsLastChunk)
+            {
+                state.Stream.Flush();
+                state.Stream.Dispose();
+                state.Stream = null;
+
+                byte[] completedBytes = File.ReadAllBytes(state.SafeFilePath);
+                string actualHash = Convert.ToHexString(SHA256.HashData(completedBytes));
+
+                if (!string.IsNullOrEmpty(state.ExpectedSha256) &&
+                    !string.Equals(actualHash, state.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+                {
+                    File.Delete(state.SafeFilePath);
+                    var failAck = new FileTransferAckMsg
+                    {
+                        TransferId = chunk.TransferId,
+                        ChunkIndex = chunk.ChunkIndex,
+                        Success = false,
+                        Error = "SHA-256 integrity mismatch."
+                    };
+                    SendEncrypted(AdbpOpCode.FileTransferAck, failAck.Serialize());
+                    FileTransferStatusChanged?.Invoke($"File corrupted (SHA mismatch): {Path.GetFileName(state.SafeFilePath)}");
+                }
+                else
+                {
+                    var successAck = new FileTransferAckMsg
+                    {
+                        TransferId = chunk.TransferId,
+                        ChunkIndex = chunk.ChunkIndex,
+                        Success = true
+                    };
+                    SendEncrypted(AdbpOpCode.FileTransferAck, successAck.Serialize());
+                    FileTransferStatusChanged?.Invoke($"File received: {Path.GetFileName(state.SafeFilePath)} ({state.BytesWritten / 1024} KB)");
+                }
+
+                _incomingTransfers.TryRemove(chunk.TransferId, out _);
+            }
+        }
+        catch (Exception ex)
+        {
+            state.Dispose();
+            _incomingTransfers.TryRemove(chunk.TransferId, out _);
+            var errAck = new FileTransferAckMsg
+            {
+                TransferId = chunk.TransferId,
+                Success = false,
+                Error = ex.Message
+            };
+            SendEncrypted(AdbpOpCode.FileTransferAck, errAck.Serialize());
+        }
+    }
+
+    private void HandleFileTransferCancel(ReadOnlySpan<byte> payload)
+    {
+        var cancel = FileTransferCancelMsg.Deserialize(payload);
+        if (cancel == null) return;
+
+        if (_incomingTransfers.TryRemove(cancel.TransferId, out var state))
+        {
+            state.Dispose();
+            if (File.Exists(state.SafeFilePath))
+            {
+                try { File.Delete(state.SafeFilePath); } catch { }
+            }
+        }
+    }
+
+    private async Task ClipboardSyncLoopAsync()
+    {
+        while (!_cts.Token.IsCancellationRequested && State == HostSessionState.Active)
+        {
+            try
+            {
+                if (Permissions.HasFlag(SessionPermissions.AllowClipboard))
+                {
+                    string text = ClipboardManager.GetText();
+                    if (!string.IsNullOrEmpty(text) && text != _lastSyncedClipboard)
+                    {
+                        _lastSyncedClipboard = text;
+                        var clipMsg = new ClipboardSyncMsg { Text = text, Format = ClipboardFormatType.Text, TimestampEpochMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
+                        SendEncrypted(AdbpOpCode.ClipboardSync, clipMsg.Serialize());
+                    }
+                }
+            }
+            catch { }
+
+            await Task.Delay(500, _cts.Token).ConfigureAwait(false);
+        }
     }
 
     private async Task CaptureAndStreamLoopAsync()
@@ -446,6 +747,13 @@ public sealed class HostSessionCoordinator : IDisposable
     public void Dispose()
     {
         TerminateSession("Host disposed.");
+        try { _streamingTask?.Wait(500); } catch { }
+        try { _clipboardSyncTask?.Wait(200); } catch { }
+        foreach (var kvp in _incomingTransfers)
+        {
+            kvp.Value.Dispose();
+        }
+        _incomingTransfers.Clear();
         try
         {
             _relaySocket?.Dispose();

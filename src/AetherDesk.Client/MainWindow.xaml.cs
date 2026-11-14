@@ -184,6 +184,9 @@ public partial class MainWindow : Window
             await _hostCoordinator.ConnectRelayAsync(relayUrl);
         }
 
+        var hostCtrlWin = new HostControlWindow(_hostCoordinator);
+        hostCtrlWin.Show();
+
         LogDiagnostic("Connection approved. Desktop streaming active.");
         TxtFooterStatus.Text = "Streaming desktop to remote partner.";
     }

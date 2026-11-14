@@ -36,8 +36,13 @@ public sealed class ViewerSession : IDisposable
     public event Action<int, int, int, int>? TileRendered; // x, y, w, h
     public event Action<int, int, int, int>? FrameReady; // minX, minY, width, height
     public event Action<int, int>? ResolutionChanged;
+    public event Action<List<MonitorInfoMsg>>? MonitorListReceived;
+    public event Action<string>? ClipboardReceived;
     public event Action<ChatMessageMsg>? ChatMessageReceived;
     public event Action<FileBrowseResponseMsg>? FileBrowseReceived;
+    public event Action<FileTransferInitMsg>? FileTransferInitReceived;
+    public event Action<FileTransferChunkMsg>? FileTransferChunkReceived;
+    public event Action<FileTransferAckMsg>? FileTransferAckReceived;
     public event Action<string>? SessionDisconnected;
 
     public ViewerSession(string partnerId, string sessionId)
@@ -222,6 +227,22 @@ public sealed class ViewerSession : IDisposable
                 }
                 break;
 
+            case AdbpOpCode.MonitorList:
+                var monList = MonitorListMsg.Deserialize(payload);
+                if (monList != null)
+                {
+                    MonitorListReceived?.Invoke(monList.Monitors);
+                }
+                break;
+
+            case AdbpOpCode.ClipboardSync:
+                var clip = ClipboardSyncMsg.Deserialize(payload);
+                if (clip != null && !string.IsNullOrEmpty(clip.Text))
+                {
+                    ClipboardReceived?.Invoke(clip.Text);
+                }
+                break;
+
             case AdbpOpCode.ChatMessage:
                 var chat = ChatMessageMsg.Deserialize(payload);
                 if (chat != null)
@@ -235,6 +256,30 @@ public sealed class ViewerSession : IDisposable
                 if (browse != null)
                 {
                     FileBrowseReceived?.Invoke(browse);
+                }
+                break;
+
+            case AdbpOpCode.FileTransferInit:
+                var ftInit = FileTransferInitMsg.Deserialize(payload);
+                if (ftInit != null)
+                {
+                    FileTransferInitReceived?.Invoke(ftInit);
+                }
+                break;
+
+            case AdbpOpCode.FileTransferChunk:
+                var ftChunk = FileTransferChunkMsg.Deserialize(payload);
+                if (ftChunk != null)
+                {
+                    FileTransferChunkReceived?.Invoke(ftChunk);
+                }
+                break;
+
+            case AdbpOpCode.FileTransferAck:
+                var ftAck = FileTransferAckMsg.Deserialize(payload);
+                if (ftAck != null)
+                {
+                    FileTransferAckReceived?.Invoke(ftAck);
                 }
                 break;
 
@@ -329,6 +374,18 @@ public sealed class ViewerSession : IDisposable
     {
         var msg = new SystemCommandMsg { Command = command };
         return SendPacketAsync(AdbpOpCode.SystemCommand, msg.Serialize());
+    }
+
+    public Task SelectMonitorAsync(int monitorIndex)
+    {
+        var msg = new SelectMonitorMsg { MonitorIndex = monitorIndex };
+        return SendPacketAsync(AdbpOpCode.SelectMonitor, msg.Serialize());
+    }
+
+    public Task SendClipboardSyncAsync(string text)
+    {
+        var msg = new ClipboardSyncMsg { Text = text, Format = ClipboardFormatType.Text, TimestampEpochMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
+        return SendPacketAsync(AdbpOpCode.ClipboardSync, msg.Serialize());
     }
 
     public Task RequestKeyFrameAsync()
