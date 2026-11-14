@@ -1,1 +1,1 @@
-wss://successfully-sue-fork-charleston.trycloudflare.com/ws/signaling
+wss://aetherdesk-production.up.railway.app/ws/signaling

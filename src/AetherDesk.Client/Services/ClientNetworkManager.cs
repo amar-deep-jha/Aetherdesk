@@ -17,10 +17,12 @@ public sealed class ClientNetworkManager : IDisposable
     private ClientWebSocket? _signalingSocket;
     private CancellationTokenSource _cts = new();
 
+    public const string DefaultSignalingUrl = "wss://aetherdesk-production.up.railway.app/ws/signaling";
+
     public DeviceIdentity Identity => _identity;
     public DatabaseService Database => _database;
     public bool IsConnectedToSignaling => _signalingSocket?.State == WebSocketState.Open;
-    public string CurrentSignalingUrl { get; private set; } = "ws://localhost:5000/ws/signaling";
+    public string CurrentSignalingUrl { get; private set; } = DefaultSignalingUrl;
 
     public event Action<bool>? SignalingStateChanged;
     // fromId, sessionId, pubKey, callback(approved, hostPubKey)
@@ -35,16 +37,36 @@ public sealed class ClientNetworkManager : IDisposable
         _database = database;
     }
 
+    public static string NormalizeSignalingUrl(string url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            return DefaultSignalingUrl;
+
+        url = url.Trim();
+        if (url.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            url = "wss://" + url.Substring(8);
+        else if (url.StartsWith("http://", StringComparison.OrdinalIgnoreCase))
+            url = "ws://" + url.Substring(7);
+        else if (!url.StartsWith("ws://", StringComparison.OrdinalIgnoreCase) && !url.StartsWith("wss://", StringComparison.OrdinalIgnoreCase))
+            url = "wss://" + url;
+
+        if (!url.EndsWith("/ws/signaling", StringComparison.OrdinalIgnoreCase))
+            url = url.TrimEnd('/') + "/ws/signaling";
+
+        return url;
+    }
+
     public string GetRelayUrl(string sessionId, string role)
     {
         string baseWs = CurrentSignalingUrl.Replace("/ws/signaling", "").TrimEnd('/');
         return $"{baseWs}/ws/relay/{sessionId}?role={role}";
     }
 
-    public async Task StartSignalingAsync(string serverWsUrl = "ws://localhost:5000/ws/signaling")
+    public async Task StartSignalingAsync(string serverWsUrl = DefaultSignalingUrl)
     {
         try
         {
+            serverWsUrl = NormalizeSignalingUrl(serverWsUrl);
             CurrentSignalingUrl = serverWsUrl;
 
             // Clean up any existing connection

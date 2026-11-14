@@ -1,1 +1,1 @@
-wss://offshore-necessity-parliamentary-productions.trycloudflare.com/ws/signaling
+wss://aetherdesk-production.up.railway.app/ws/signaling

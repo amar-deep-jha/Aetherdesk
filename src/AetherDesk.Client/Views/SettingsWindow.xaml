@@ -19,7 +19,7 @@
             <!-- Server URL -->
             <TextBlock Text="Signaling &amp; Relay Server URL" Foreground="#D1D5DB" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,6" />
             <TextBox x:Name="TxtServerUrl" Background="#111827" Foreground="#FFFFFF" BorderBrush="#374151" Padding="10,8" FontSize="13" FontFamily="Consolas" />
-            <TextBlock Text="Tip: For connecting from a partner PC on the same Wi-Fi/LAN, use: ws://YOUR_PC_IP:5000/ws/signaling" Foreground="#06B6D4" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,16" />
+            <TextBlock Text="Production: wss://aetherdesk-production.up.railway.app/ws/signaling" Foreground="#06B6D4" FontSize="11" TextWrapping="Wrap" Margin="0,4,0,16" />
 
             <!-- Unattended Password -->
             <TextBlock Text="Unattended Access Password" Foreground="#D1D5DB" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,6" />
@@ -29,7 +29,7 @@
 
         <!-- Bottom Actions -->
         <DockPanel Grid.Row="2" Margin="0,16,0,0">
-            <Button Content="Reset to Localhost" Click="BtnResetLocalhost_Click" Background="#1F2937" Foreground="#9CA3AF" BorderBrush="#374151" Padding="10,6" DockPanel.Dock="Left" Cursor="Hand" />
+            <Button Content="Reset to Production" Click="BtnResetLocalhost_Click" Background="#1F2937" Foreground="#9CA3AF" BorderBrush="#374151" Padding="10,6" DockPanel.Dock="Left" Cursor="Hand" />
             <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
                 <Button Content="Cancel" Click="BtnCancel_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="14,6" Margin="0,0,8,0" Cursor="Hand" />
                 <Button Content="Save &amp; Apply" Click="BtnSave_Click" Background="#06B6D4" Foreground="#0B0F19" FontWeight="Bold" BorderThickness="0" Padding="18,6" Cursor="Hand" />

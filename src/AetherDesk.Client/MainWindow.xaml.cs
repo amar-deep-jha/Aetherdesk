@@ -77,7 +77,12 @@ public partial class MainWindow : Window
     {
         LoadRecentSessions();
 
-        string signalingUrl = _database.GetSetting("signaling_url", "ws://localhost:5000/ws/signaling");
+        string signalingUrl = _database.GetSetting("signaling_url", ClientNetworkManager.DefaultSignalingUrl);
+        if (signalingUrl == "ws://localhost:5000/ws/signaling" || string.IsNullOrWhiteSpace(signalingUrl))
+        {
+            signalingUrl = ClientNetworkManager.DefaultSignalingUrl;
+            _database.SetSetting("signaling_url", signalingUrl);
+        }
 
         // Check if server.txt exists alongside executable
         string appDir = AppDomain.CurrentDomain.BaseDirectory;
