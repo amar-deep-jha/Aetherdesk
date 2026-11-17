@@ -14,8 +14,10 @@ public sealed class ClientNetworkManager : IDisposable
 {
     private readonly DeviceIdentity _identity;
     private readonly DatabaseService _database;
+    private readonly SemaphoreSlim _sendLock = new(1, 1);
     private ClientWebSocket? _signalingSocket;
     private CancellationTokenSource _cts = new();
+    private Task? _supervisorTask;
 
     public const string DefaultSignalingUrl = "wss://aetherdesk-production.up.railway.app/ws/signaling";
 
@@ -62,45 +64,94 @@ public sealed class ClientNetworkManager : IDisposable
         return $"{baseWs}/ws/relay/{sessionId}?role={role}";
     }
 
-    public async Task StartSignalingAsync(string serverWsUrl = DefaultSignalingUrl)
+    public Task StartSignalingAsync(string serverWsUrl = DefaultSignalingUrl)
     {
-        try
+        serverWsUrl = NormalizeSignalingUrl(serverWsUrl);
+        CurrentSignalingUrl = serverWsUrl;
+
+        // Clean up any existing connection
+        if (_signalingSocket != null)
         {
-            serverWsUrl = NormalizeSignalingUrl(serverWsUrl);
-            CurrentSignalingUrl = serverWsUrl;
-
-            // Clean up any existing connection
-            if (_signalingSocket != null)
-            {
-                try { _cts.Cancel(); } catch { }
-                try { _signalingSocket.Dispose(); } catch { }
-            }
-            _cts = new CancellationTokenSource();
-
-            _signalingSocket = new ClientWebSocket();
-            StatusLogReceived?.Invoke($"Connecting to signaling server at {serverWsUrl}...");
-            await _signalingSocket.ConnectAsync(new Uri(serverWsUrl), _cts.Token).ConfigureAwait(false);
-
-            SignalingStateChanged?.Invoke(true);
-            StatusLogReceived?.Invoke("Connected to signaling server. Registering device ID...");
-
-            // Send register message
-            var regMsg = new
-            {
-                type = "register",
-                deviceId = _identity.DeviceId,
-                deviceName = _identity.DeviceName
-            };
-            await SendSignalingJsonAsync(regMsg).ConfigureAwait(false);
-
-            // Start background receiver and heartbeat
-            _ = Task.Run(ReceiveSignalingLoopAsync);
-            _ = Task.Run(HeartbeatLoopAsync);
+            try { _cts.Cancel(); } catch { }
+            try { _signalingSocket.Dispose(); } catch { }
         }
-        catch (Exception ex)
+        _cts = new CancellationTokenSource();
+
+        _supervisorTask = Task.Run(RunSignalingSupervisorAsync);
+        return Task.CompletedTask;
+    }
+
+    private async Task RunSignalingSupervisorAsync()
+    {
+        int attempt = 0;
+        while (!_cts.Token.IsCancellationRequested)
         {
-            SignalingStateChanged?.Invoke(false);
-            StatusLogReceived?.Invoke($"Signaling connection error: {ex.Message}");
+            try
+            {
+                if (_signalingSocket != null)
+                {
+                    try { _signalingSocket.Dispose(); } catch { }
+                    _signalingSocket = null;
+                }
+
+                _signalingSocket = new ClientWebSocket();
+                _signalingSocket.Options.KeepAliveInterval = TimeSpan.FromSeconds(10);
+
+                StatusLogReceived?.Invoke($"Connecting to signaling server at {CurrentSignalingUrl}...");
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(_cts.Token);
+                timeoutCts.CancelAfter(TimeSpan.FromSeconds(10));
+
+                await _signalingSocket.ConnectAsync(new Uri(CurrentSignalingUrl), timeoutCts.Token).ConfigureAwait(false);
+
+                attempt = 0;
+                SignalingStateChanged?.Invoke(true);
+                StatusLogReceived?.Invoke("Connected to signaling server. Registering device ID...");
+
+                // Send register message
+                var regMsg = new
+                {
+                    type = "register",
+                    deviceId = _identity.DeviceId,
+                    deviceName = _identity.DeviceName
+                };
+                await SendSignalingJsonAsync(regMsg).ConfigureAwait(false);
+
+                // Concurrently run heartbeat and receive loops
+                var receiveTask = ReceiveSignalingLoopAsync();
+                var heartbeatTask = HeartbeatLoopAsync();
+
+                await Task.WhenAny(receiveTask, heartbeatTask).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (_cts.Token.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception ex)
+            {
+                StatusLogReceived?.Invoke($"Signaling connection notice: {ex.Message}");
+            }
+            finally
+            {
+                SignalingStateChanged?.Invoke(false);
+                try { _signalingSocket?.Dispose(); } catch { }
+                _signalingSocket = null;
+            }
+
+            if (_cts.Token.IsCancellationRequested)
+                break;
+
+            attempt++;
+            int backoffMs = Math.Min(1000 * (1 << Math.Min(attempt, 3)), 8000);
+            StatusLogReceived?.Invoke($"Signaling disconnected. Auto-reconnecting in {backoffMs / 1000}s (attempt {attempt})...");
+
+            try
+            {
+                await Task.Delay(backoffMs, _cts.Token).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                break;
+            }
         }
     }
 
@@ -123,10 +174,10 @@ public sealed class ClientNetworkManager : IDisposable
         {
             try
             {
-                await Task.Delay(10000, _cts.Token).ConfigureAwait(false);
+                await Task.Delay(5000, _cts.Token).ConfigureAwait(false);
                 await SendSignalingJsonAsync(new { type = "heartbeat", deviceId = _identity.DeviceId }).ConfigureAwait(false);
             }
-            catch { }
+            catch { break; }
         }
     }
 
@@ -227,13 +278,31 @@ public sealed class ClientNetworkManager : IDisposable
     {
         if (_signalingSocket?.State != WebSocketState.Open) return;
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(payload);
-        await _signalingSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);
+
+        try
+        {
+            await _sendLock.WaitAsync(_cts.Token).ConfigureAwait(false);
+            try
+            {
+                if (_signalingSocket?.State == WebSocketState.Open)
+                {
+                    await _signalingSocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Text, true, CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                _sendLock.Release();
+            }
+        }
+        catch { }
     }
 
     public void Dispose()
     {
         _cts.Cancel();
+        try { _supervisorTask?.Wait(200); } catch { }
         _signalingSocket?.Dispose();
+        _sendLock.Dispose();
         _cts.Dispose();
     }
 }

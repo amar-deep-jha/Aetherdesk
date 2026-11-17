@@ -28,15 +28,29 @@ public sealed class ViewerSession : IDisposable
     private long _lastFpsCalculationTime;
     public double CurrentFps { get; private set; }
     public double BandwidthKbps { get; private set; }
+    public long RoundTripTimeMs { get; private set; } = 25;
+    public string ConnectionType { get; private set; } = "Relayed (Railway WSS)";
+    public double PacketLossPercent { get; private set; } = 0.0;
     public int Width => _width;
     public int Height => _height;
     public string PartnerId => _partnerId;
     public string SessionId => _sessionId;
 
+    private readonly System.Threading.Channels.Channel<AdbpPacket> _outboundQueue = System.Threading.Channels.Channel.CreateBounded<AdbpPacket>(new System.Threading.Channels.BoundedChannelOptions(256)
+    {
+        FullMode = System.Threading.Channels.BoundedChannelFullMode.Wait,
+        SingleReader = true
+    });
+    private Task? _outboundSenderTask;
+    private Task? _pingTask;
+
     public event Action<int, int, int, int>? TileRendered; // x, y, w, h
     public event Action<int, int, int, int>? FrameReady; // minX, minY, width, height
     public event Action<int, int>? ResolutionChanged;
     public event Action<List<MonitorInfoMsg>>? MonitorListReceived;
+    public event Action<CursorShapeMsg>? CursorShapeReceived;
+    public event Action<int, int, bool>? CursorPositionReceived;
+    public event Action<long>? RoundTripTimeMeasured;
     public event Action<string>? ClipboardReceived;
     public event Action<ChatMessageMsg>? ChatMessageReceived;
     public event Action<FileBrowseResponseMsg>? FileBrowseReceived;
@@ -65,6 +79,8 @@ public sealed class ViewerSession : IDisposable
     {
         _relaySocket = new ClientWebSocket();
         await _relaySocket.ConnectAsync(new Uri(relayWsUrl), _cts.Token).ConfigureAwait(false);
+        _outboundSenderTask = Task.Run(OutboundSenderLoopAsync);
+        _pingTask = Task.Run(PingLoopAsync);
         _ = Task.Run(ReceiveRelayLoopAsync);
     }
 
@@ -227,6 +243,40 @@ public sealed class ViewerSession : IDisposable
                 }
                 break;
 
+            case AdbpOpCode.CursorShape:
+                var shape = CursorShapeMsg.Deserialize(payload);
+                if (shape != null)
+                {
+                    CursorShapeReceived?.Invoke(shape);
+                }
+                break;
+
+            case AdbpOpCode.CursorPosition:
+                var cPos = CursorPositionMsg.Deserialize(payload);
+                if (cPos != null)
+                {
+                    CursorPositionReceived?.Invoke(cPos.X, cPos.Y, cPos.Visible);
+                }
+                break;
+
+            case AdbpOpCode.Ping:
+                var pingMsg = PingPongMsg.Deserialize(payload);
+                if (pingMsg != null)
+                {
+                    _ = SendPacketAsync(AdbpOpCode.Pong, pingMsg.Serialize());
+                }
+                break;
+
+            case AdbpOpCode.Pong:
+                var pongMsg = PingPongMsg.Deserialize(payload);
+                if (pongMsg != null)
+                {
+                    long rtt = Math.Max(1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - pongMsg.TimestampEpochMs);
+                    RoundTripTimeMs = rtt;
+                    RoundTripTimeMeasured?.Invoke(rtt);
+                }
+                break;
+
             case AdbpOpCode.MonitorList:
                 var monList = MonitorListMsg.Deserialize(payload);
                 if (monList != null)
@@ -303,10 +353,8 @@ public sealed class ViewerSession : IDisposable
         }
     }
 
-    public async Task SendPacketAsync(AdbpOpCode opCode, byte[] payload)
+    public Task SendPacketAsync(AdbpOpCode opCode, byte[] payload)
     {
-        if (_relaySocket?.State != WebSocketState.Open) return;
-
         byte[] finalPayload = payload;
         AdbpFlags flags = AdbpFlags.None;
 
@@ -317,9 +365,42 @@ public sealed class ViewerSession : IDisposable
         }
 
         var packet = new AdbpPacket(opCode, finalPayload, flags);
-        byte[] bytes = packet.Serialize();
+        _outboundQueue.Writer.TryWrite(packet);
+        return Task.CompletedTask;
+    }
 
-        await _relaySocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Binary, true, CancellationToken.None).ConfigureAwait(false);
+    private async Task OutboundSenderLoopAsync()
+    {
+        try
+        {
+            while (await _outboundQueue.Reader.WaitToReadAsync(_cts.Token).ConfigureAwait(false))
+            {
+                while (_outboundQueue.Reader.TryRead(out var packet))
+                {
+                    if (_relaySocket?.State == WebSocketState.Open)
+                    {
+                        byte[] bytes = packet.Serialize();
+                        await _relaySocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Binary, true, _cts.Token).ConfigureAwait(false);
+                    }
+                }
+            }
+        }
+        catch { }
+    }
+
+    private async Task PingLoopAsync()
+    {
+        while (!_cts.Token.IsCancellationRequested && _relaySocket?.State == WebSocketState.Open)
+        {
+            try
+            {
+                var ping = new PingPongMsg { TimestampEpochMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() };
+                await SendPacketAsync(AdbpOpCode.Ping, ping.Serialize()).ConfigureAwait(false);
+            }
+            catch { }
+
+            await Task.Delay(1500, _cts.Token).ConfigureAwait(false);
+        }
     }
 
     public Task SendMouseMoveAsync(int x, int y, bool isNormalized)
@@ -406,6 +487,9 @@ public sealed class ViewerSession : IDisposable
     public void Dispose()
     {
         Disconnect();
+        _outboundQueue.Writer.TryComplete();
+        try { _outboundSenderTask?.Wait(200); } catch { }
+        try { _pingTask?.Wait(200); } catch { }
         _relaySocket?.Dispose();
         _ecdh.Dispose();
         _cipher?.Dispose();

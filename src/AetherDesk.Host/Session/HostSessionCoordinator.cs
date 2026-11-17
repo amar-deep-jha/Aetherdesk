@@ -27,14 +27,23 @@ public sealed class HostSessionCoordinator : IDisposable
     private readonly IScreenCapturer _capturer;
     private readonly TileDiffEngine _diffEngine;
     private readonly EcdhKeyExchange _ecdh;
+    private readonly HostCursorManager _cursorManager;
     private AesGcmCipher? _cipher;
 
     private readonly CancellationTokenSource _cts = new();
+    private readonly System.Threading.Channels.Channel<AdbpPacket> _outboundQueue = System.Threading.Channels.Channel.CreateBounded<AdbpPacket>(new System.Threading.Channels.BoundedChannelOptions(256)
+    {
+        FullMode = System.Threading.Channels.BoundedChannelFullMode.DropOldest,
+        SingleReader = true
+    });
+    private Task? _outboundSenderTask;
     private Task? _streamingTask;
+    private Task? _cursorMonitorTask;
     private Task? _clipboardSyncTask;
     private string _lastSyncedClipboard = string.Empty;
     private uint _frameCounter;
     private bool _requestKeyFrame = true;
+    private long _currentRttMs = 20;
 
     private sealed class HostFileTransferState : IDisposable
     {
@@ -70,6 +79,23 @@ public sealed class HostSessionCoordinator : IDisposable
         _capturer = capturer ?? new GdiScreenCapturer();
         _diffEngine = new TileDiffEngine();
         _ecdh = new EcdhKeyExchange();
+        _cursorManager = new HostCursorManager();
+
+        _cursorManager.CursorShapeChanged += msg =>
+        {
+            if (State == HostSessionState.Active)
+            {
+                SendEncrypted(AdbpOpCode.CursorShape, msg.Serialize());
+            }
+        };
+
+        _cursorManager.CursorPositionChanged += msg =>
+        {
+            if (State == HostSessionState.Active)
+            {
+                SendEncrypted(AdbpOpCode.CursorPosition, msg.Serialize());
+            }
+        };
     }
 
     public void Initialize()
@@ -136,8 +162,14 @@ public sealed class HostSessionCoordinator : IDisposable
         }
         catch { }
 
+        // Broadcast initial cursor shape
+        SendEncrypted(AdbpOpCode.CursorShape, new CursorShapeMsg { CursorType = "Arrow", Width = 32, Height = 32 }.Serialize());
+
         // Start capture loop
         _streamingTask = Task.Run(CaptureAndStreamLoopAsync);
+
+        // Start cursor monitor loop
+        _cursorMonitorTask = Task.Run(CursorMonitorLoopAsync);
 
         // Start clipboard sync loop
         _clipboardSyncTask = Task.Run(ClipboardSyncLoopAsync);
@@ -266,6 +298,22 @@ public sealed class HostSessionCoordinator : IDisposable
 
             case AdbpOpCode.KeyFrameRequest:
                 _requestKeyFrame = true;
+                break;
+
+            case AdbpOpCode.Ping:
+                var ping = PingPongMsg.Deserialize(payload);
+                if (ping != null)
+                {
+                    SendEncrypted(AdbpOpCode.Pong, ping.Serialize());
+                }
+                break;
+
+            case AdbpOpCode.Pong:
+                var pong = PingPongMsg.Deserialize(payload);
+                if (pong != null)
+                {
+                    _currentRttMs = Math.Max(1, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - pong.TimestampEpochMs);
+                }
                 break;
 
             case AdbpOpCode.SelectMonitor:
@@ -602,18 +650,19 @@ public sealed class HostSessionCoordinator : IDisposable
 
     private async Task CaptureAndStreamLoopAsync()
     {
-        const int targetFps = 60;
-        int frameIntervalMs = 1000 / targetFps;
-
         while (!_cts.Token.IsCancellationRequested && State == HostSessionState.Active)
         {
+            // Adaptive streaming: dynamically adjust FPS based on measured RTT latency
+            int targetFps = _currentRttMs > 150 ? 15 : _currentRttMs > 60 ? 30 : 60;
+            int frameIntervalMs = 1000 / targetFps;
+
             var frameStart = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
 
             var frame = _capturer.CaptureFrame();
             if (frame != null)
             {
                 uint frameId = unchecked(++_frameCounter);
-                bool forceKey = _requestKeyFrame || (frameId % 180 == 0);
+                bool forceKey = _requestKeyFrame || (frameId % (uint)(targetFps * 3) == 0);
                 if (forceKey)
                     _requestKeyFrame = false;
 
@@ -633,6 +682,20 @@ public sealed class HostSessionCoordinator : IDisposable
             var elapsed = (int)(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - frameStart);
             int sleepTime = Math.Max(1, frameIntervalMs - elapsed);
             await Task.Delay(sleepTime, _cts.Token).ConfigureAwait(false);
+        }
+    }
+
+    private async Task CursorMonitorLoopAsync()
+    {
+        while (!_cts.Token.IsCancellationRequested && State == HostSessionState.Active)
+        {
+            try
+            {
+                _cursorManager.PollCursor();
+            }
+            catch { }
+
+            await Task.Delay(33, _cts.Token).ConfigureAwait(false); // ~30 Hz polling
         }
     }
 
@@ -661,6 +724,7 @@ public sealed class HostSessionCoordinator : IDisposable
 
         var packet = new AdbpPacket(opCode, finalPayload, flags);
         OutgoingPacketReady?.Invoke(packet);
+        _outboundQueue.Writer.TryWrite(packet);
     }
 
     public void TerminateSession(string reason)
@@ -690,20 +754,27 @@ public sealed class HostSessionCoordinator : IDisposable
             _relaySocket = new ClientWebSocket();
             await _relaySocket.ConnectAsync(new Uri(relayWsUrl), _cts.Token).ConfigureAwait(false);
 
-            OutgoingPacketReady += async packet =>
-            {
-                if (_relaySocket?.State == WebSocketState.Open)
-                {
-                    byte[] bytes = packet.Serialize();
-                    try
-                    {
-                        await _relaySocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Binary, true, CancellationToken.None).ConfigureAwait(false);
-                    }
-                    catch { }
-                }
-            };
-
+            _outboundSenderTask = Task.Run(OutboundSenderLoopAsync);
             _ = Task.Run(ReceiveRelayLoopAsync);
+        }
+        catch { }
+    }
+
+    private async Task OutboundSenderLoopAsync()
+    {
+        try
+        {
+            while (await _outboundQueue.Reader.WaitToReadAsync(_cts.Token).ConfigureAwait(false))
+            {
+                while (_outboundQueue.Reader.TryRead(out var packet))
+                {
+                    if (_relaySocket?.State == WebSocketState.Open)
+                    {
+                        byte[] bytes = packet.Serialize();
+                        await _relaySocket.SendAsync(new ArraySegment<byte>(bytes), WebSocketMessageType.Binary, true, _cts.Token).ConfigureAwait(false);
+                    }
+                }
+            }
         }
         catch { }
     }
@@ -748,7 +819,10 @@ public sealed class HostSessionCoordinator : IDisposable
     {
         TerminateSession("Host disposed.");
         try { _streamingTask?.Wait(500); } catch { }
+        try { _cursorMonitorTask?.Wait(200); } catch { }
         try { _clipboardSyncTask?.Wait(200); } catch { }
+        _outboundQueue.Writer.TryComplete();
+        try { _outboundSenderTask?.Wait(200); } catch { }
         foreach (var kvp in _incomingTransfers)
         {
             kvp.Value.Dispose();
@@ -759,6 +833,7 @@ public sealed class HostSessionCoordinator : IDisposable
             _relaySocket?.Dispose();
         }
         catch { }
+        _cursorManager.Dispose();
         _capturer.Dispose();
         _ecdh.Dispose();
         _cipher?.Dispose();

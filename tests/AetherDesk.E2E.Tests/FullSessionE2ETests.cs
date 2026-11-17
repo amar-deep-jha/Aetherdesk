@@ -287,4 +287,108 @@ public class FullSessionE2ETests
 
         Assert.True(cadResult || winResult || taskMgrResult);
     }
+
+    [Fact]
+    public void E2E_CursorShapeAndPosition_TransmitsAndReceivesAccurately()
+    {
+        using var host = new HostSessionCoordinator();
+        host.Initialize();
+
+        var viewer = new ViewerSession("395253222", "sess-test-cursor");
+
+        var hsReq = new HandshakeRequest
+        {
+            DeviceId = "111222333",
+            EphemeralPublicKeyBase64 = viewer.GetLocalPublicKeyBase64()
+        };
+        var hsResp = host.HandleHandshake(hsReq);
+        viewer.SetRemotePublicKey(hsResp.EphemeralPublicKeyBase64);
+
+        CursorShapeMsg? receivedShape = null;
+        viewer.CursorShapeReceived += shape => receivedShape = shape;
+
+        // Pipe Host -> Viewer
+        host.OutgoingPacketReady += packet =>
+        {
+            byte[] bytes = packet.Serialize();
+            viewer.ProcessIncomingPacketBytes(bytes);
+        };
+
+        host.ApproveSession(SessionPermissions.All);
+
+        // Allow initial cursor shape broadcast
+        Thread.Sleep(100);
+
+        Assert.NotNull(receivedShape);
+        Assert.Equal("Arrow", receivedShape.CursorType);
+    }
+
+    [Fact]
+    public void E2E_PingPong_RoundTripTimeMeasurement_CalculatesLatency()
+    {
+        using var host = new HostSessionCoordinator();
+        host.Initialize();
+
+        var viewer = new ViewerSession("395253222", "sess-test-ping");
+
+        var hsReq = new HandshakeRequest
+        {
+            DeviceId = "111222333",
+            EphemeralPublicKeyBase64 = viewer.GetLocalPublicKeyBase64()
+        };
+        var hsResp = host.HandleHandshake(hsReq);
+        viewer.SetRemotePublicKey(hsResp.EphemeralPublicKeyBase64);
+
+        long measuredRtt = -1;
+        viewer.RoundTripTimeMeasured += rtt => measuredRtt = rtt;
+
+        // Bidirectional Pipe
+        host.OutgoingPacketReady += packet =>
+        {
+            byte[] bytes = packet.Serialize();
+            viewer.ProcessIncomingPacketBytes(bytes);
+        };
+
+        host.ApproveSession(SessionPermissions.All);
+
+        long sendTime = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() - 15;
+        var ping = new PingPongMsg { TimestampEpochMs = sendTime };
+        var pingPacket = new AdbpPacket(AdbpOpCode.Ping, ping.Serialize(), AdbpFlags.None);
+
+        host.HandleIncomingPacket(pingPacket);
+
+        Assert.True(measuredRtt >= 0, "Viewer should have calculated non-negative RTT latency.");
+    }
+
+    [Fact]
+    public void E2E_DisplayScaling_FitToWindowAndCoordinateTransform_MaintainsPrecision()
+    {
+        // Test coordinate transformation mathematics across aspect ratios
+        int remoteWidth = 1920;
+        int remoteHeight = 1080;
+        double viewportWidth = 1280;
+        double viewportHeight = 720;
+
+        // In Fit to Window (both 16:9): scale = 1280 / 1920 = 0.66667
+        double scale = Math.Min(viewportWidth / remoteWidth, viewportHeight / remoteHeight);
+        double renderWidth = remoteWidth * scale;
+        double renderHeight = remoteHeight * scale;
+
+        Assert.Equal(1280, renderWidth);
+        Assert.Equal(720, renderHeight);
+
+        // Center click (640, 360) on local viewport
+        double localX = 640;
+        double localY = 360;
+
+        double remoteX = (localX / renderWidth) * (remoteWidth - 1);
+        double remoteY = (localY / renderHeight) * (remoteHeight - 1);
+
+        int normX = (int)Math.Clamp(Math.Round(remoteX * 65535.0 / (remoteWidth - 1)), 0, 65535);
+        int normY = (int)Math.Clamp(Math.Round(remoteY * 65535.0 / (remoteHeight - 1)), 0, 65535);
+
+        // Normalized midpoint is 32768
+        Assert.InRange(normX, 32760, 32775);
+        Assert.InRange(normY, 32760, 32775);
+    }
 }

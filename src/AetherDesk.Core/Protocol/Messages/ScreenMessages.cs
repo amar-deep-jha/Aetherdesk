@@ -165,6 +165,9 @@ public sealed class CursorPositionMsg
 
 public sealed class CursorShapeMsg
 {
+    [JsonPropertyName("type")]
+    public string CursorType { get; set; } = "Arrow";
+
     [JsonPropertyName("w")]
     public int Width { get; set; }
 

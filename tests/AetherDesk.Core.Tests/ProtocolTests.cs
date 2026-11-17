@@ -104,4 +104,61 @@ public class ProtocolTests
         Assert.NotNull(deserializedAuth);
         Assert.Equal(AuthMode.AttendedPrompt, deserializedAuth.Mode);
     }
+
+    [Fact]
+    public void CursorShapeMsg_SerializeAndDeserialize_PreservesCursorTypeAndHotspots()
+    {
+        var shape = new CursorShapeMsg
+        {
+            CursorType = "IBeam",
+            Width = 32,
+            Height = 32,
+            HotspotX = 7,
+            HotspotY = 15,
+            RgbaBase64 = "ABCD1234=="
+        };
+
+        byte[] bytes = shape.Serialize();
+        var deserialized = CursorShapeMsg.Deserialize(bytes);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal("IBeam", deserialized.CursorType);
+        Assert.Equal(32, deserialized.Width);
+        Assert.Equal(32, deserialized.Height);
+        Assert.Equal(7, deserialized.HotspotX);
+        Assert.Equal(15, deserialized.HotspotY);
+        Assert.Equal("ABCD1234==", deserialized.RgbaBase64);
+    }
+
+    [Fact]
+    public void CursorPositionMsg_SerializeAndDeserialize_PreservesCoordinates()
+    {
+        var pos = new CursorPositionMsg
+        {
+            X = 1440,
+            Y = 900,
+            Visible = true
+        };
+
+        byte[] bytes = pos.Serialize();
+        var deserialized = CursorPositionMsg.Deserialize(bytes);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal(1440, deserialized.X);
+        Assert.Equal(900, deserialized.Y);
+        Assert.True(deserialized.Visible);
+    }
+
+    [Fact]
+    public void PingPongMsg_SerializeAndDeserialize_RoundTripsAccurately()
+    {
+        long now = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+        var ping = new PingPongMsg { TimestampEpochMs = now };
+
+        byte[] bytes = ping.Serialize();
+        var deserialized = PingPongMsg.Deserialize(bytes);
+
+        Assert.NotNull(deserialized);
+        Assert.Equal(now, deserialized.TimestampEpochMs);
+    }
 }

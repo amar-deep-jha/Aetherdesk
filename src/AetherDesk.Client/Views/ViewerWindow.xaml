@@ -38,8 +38,9 @@
                     <Button Content="Win" Click="BtnWinKey_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Send Windows Key" />
                     <Button Content="Lock" Click="BtnLock_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Lock workstation" />
                     <Button Content="Screenshot" Click="BtnScreenshot_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Save screenshot to Desktop" />
-                    <Button x:Name="BtnDisplayMode" Content="Fit Screen" Click="BtnDisplayMode_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Cycle Display Scaling (Fit / 1:1 Native / Stretch)" />
+                    <Button x:Name="BtnDisplayMode" Content="Fit to Window" Click="BtnDisplayMode_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Cycle Display Scaling (Fit to Window / Fill Screen / Original 1:1)" />
                     <Button x:Name="BtnFullScreen" Content="Fullscreen (F11)" Click="BtnFullScreen_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Toggle True Full-Screen Mode (F11)" />
+                    <Button x:Name="BtnDiagnostics" Content="Diagnostics" Click="BtnDiagnostics_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Show Real-Time Diagnostics &amp; Telemetry" />
                     <Button Content="Files" Click="BtnFileTransfer_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Open File Transfer Manager" />
                     <Button x:Name="BtnToggleChat" Content="Chat" Click="BtnToggleChat_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="7,4" Margin="0,0,4,0" Cursor="Hand" ToolTip="Open In-Session Chat" />
                     <Button x:Name="BtnPinToolbar" Content="📌" Click="BtnPinToolbar_Click" Background="#1F2937" Foreground="#9CA3AF" BorderBrush="#374151" Padding="6,4" Margin="0,0,8,0" Cursor="Hand" ToolTip="Pin toolbar in full-screen" />
@@ -56,7 +57,7 @@
                        MouseDown="ImgViewport_MouseDown"
                        MouseUp="ImgViewport_MouseUp"
                        MouseWheel="ImgViewport_MouseWheel"
-                       Cursor="Cross"
+                       Cursor="Arrow"
                        RenderOptions.BitmapScalingMode="HighQuality" />
 
                 <!-- Drop & Transfer In-Viewport Overlay Notification -->
@@ -68,6 +69,66 @@
                 </Border>
             </Grid>
         </ScrollViewer>
+
+        <!-- In-Session Diagnostics Overlay -->
+        <Border x:Name="PnlDiagnostics" Grid.Row="1" Grid.Column="0" Background="#F0111827" BorderBrush="#374151" BorderThickness="1" CornerRadius="8" Padding="18" HorizontalAlignment="Right" VerticalAlignment="Top" Margin="0,12,12,0" Width="340" Visibility="Collapsed" Panel.ZIndex="150">
+            <StackPanel>
+                <DockPanel Margin="0,0,0,10">
+                    <TextBlock Text="Session Diagnostics" Foreground="#F3F4F6" FontWeight="SemiBold" FontSize="14" DockPanel.Dock="Left" />
+                    <Button Content="✕" Click="BtnCloseDiagnostics_Click" Background="Transparent" Foreground="#9CA3AF" BorderThickness="0" DockPanel.Dock="Right" HorizontalAlignment="Right" Cursor="Hand" />
+                </DockPanel>
+
+                <Grid Margin="0,3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="Security:" Foreground="#9CA3AF" FontSize="12" />
+                    <TextBlock Text="E2EE AES-256-GCM" Foreground="#10B981" FontWeight="SemiBold" FontSize="12" Grid.Column="1" />
+                </Grid>
+
+                <Grid Margin="0,3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="Transport Route:" Foreground="#9CA3AF" FontSize="12" />
+                    <TextBlock x:Name="DiagTxtTransport" Text="Relayed (Railway WSS)" Foreground="#06B6D4" FontSize="12" Grid.Column="1" />
+                </Grid>
+
+                <Grid Margin="0,3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="Round-Trip Time (RTT):" Foreground="#9CA3AF" FontSize="12" />
+                    <TextBlock x:Name="DiagTxtRtt" Text="0 ms" Foreground="#F3F4F6" FontWeight="Medium" FontSize="12" Grid.Column="1" />
+                </Grid>
+
+                <Grid Margin="0,3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="Framerate (FPS):" Foreground="#9CA3AF" FontSize="12" />
+                    <TextBlock x:Name="DiagTxtFps" Text="0.0 FPS" Foreground="#F3F4F6" FontWeight="Medium" FontSize="12" Grid.Column="1" />
+                </Grid>
+
+                <Grid Margin="0,3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="Bandwidth Rate:" Foreground="#9CA3AF" FontSize="12" />
+                    <TextBlock x:Name="DiagTxtBandwidth" Text="0.0 Kbps" Foreground="#F3F4F6" FontWeight="Medium" FontSize="12" Grid.Column="1" />
+                </Grid>
+
+                <Grid Margin="0,3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="Remote Display:" Foreground="#9CA3AF" FontSize="12" />
+                    <TextBlock x:Name="DiagTxtResolution" Text="1920 x 1080" Foreground="#F3F4F6" FontSize="12" Grid.Column="1" />
+                </Grid>
+
+                <Grid Margin="0,3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="Scaling Mode:" Foreground="#9CA3AF" FontSize="12" />
+                    <TextBlock x:Name="DiagTxtDisplayMode" Text="Fit to Window" Foreground="#F3F4F6" FontSize="12" Grid.Column="1" />
+                </Grid>
+
+                <Grid Margin="0,3">
+                    <Grid.ColumnDefinitions><ColumnDefinition Width="*" /><ColumnDefinition Width="Auto" /></Grid.ColumnDefinitions>
+                    <TextBlock Text="Packet Quality:" Foreground="#9CA3AF" FontSize="12" />
+                    <TextBlock x:Name="DiagTxtLoss" Text="Optimal (0.0% loss)" Foreground="#10B981" FontSize="12" Grid.Column="1" />
+                </Grid>
+
+                <Button Content="Copy Diagnostics Report" Click="BtnCopyDiagnostics_Click" Background="#1F2937" Foreground="#06B6D4" BorderBrush="#374151" Margin="0,12,0,0" Padding="8,6" Cursor="Hand" />
+            </StackPanel>
+        </Border>
 
         <!-- Right Chat Sidebar (Collapsible) -->
         <Border x:Name="ChatSidebar" Grid.Row="1" Grid.Column="1" Width="300" Background="#111827" BorderBrush="#1F2937" BorderThickness="1,0,0,0" Visibility="Collapsed">

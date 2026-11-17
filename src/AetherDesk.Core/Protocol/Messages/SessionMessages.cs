@@ -56,3 +56,12 @@ public sealed class PermissionChangeMsg
     public byte[] Serialize() => JsonSerializer.SerializeToUtf8Bytes(this);
     public static PermissionChangeMsg? Deserialize(ReadOnlySpan<byte> bytes) => JsonSerializer.Deserialize<PermissionChangeMsg>(bytes);
 }
+
+public sealed class PingPongMsg
+{
+    [JsonPropertyName("ts")]
+    public long TimestampEpochMs { get; set; }
+
+    public byte[] Serialize() => JsonSerializer.SerializeToUtf8Bytes(this);
+    public static PingPongMsg? Deserialize(ReadOnlySpan<byte> bytes) => JsonSerializer.Deserialize<PingPongMsg>(bytes);
+}

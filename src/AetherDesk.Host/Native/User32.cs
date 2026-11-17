@@ -162,4 +162,58 @@ internal static partial class User32
 
     [DllImport("user32.dll")]
     public static extern bool IsClipboardFormatAvailable(uint format);
+
+    public const int CURSOR_SHOWING = 0x00000001;
+    public const int CURSOR_SUPPRESSED = 0x00000002;
+
+    public const int IDC_ARROW = 32512;
+    public const int IDC_IBEAM = 32513;
+    public const int IDC_WAIT = 32514;
+    public const int IDC_CROSS = 32515;
+    public const int IDC_UPARROW = 32516;
+    public const int IDC_SIZE = 32640;
+    public const int IDC_ICON = 32641;
+    public const int IDC_SIZENWSE = 32642;
+    public const int IDC_SIZENESW = 32643;
+    public const int IDC_SIZEWE = 32644;
+    public const int IDC_SIZENS = 32645;
+    public const int IDC_SIZEALL = 32646;
+    public const int IDC_NO = 32648;
+    public const int IDC_HAND = 32649;
+    public const int IDC_APPSTARTING = 32650;
+    public const int IDC_HELP = 32651;
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct CURSORINFO
+    {
+        public int cbSize;
+        public int flags;
+        public IntPtr hCursor;
+        public POINT ptScreenPos;
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    public struct ICONINFO
+    {
+        public bool fIcon;
+        public int xHotspot;
+        public int yHotspot;
+        public IntPtr hbmMask;
+        public IntPtr hbmColor;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetCursorInfo(ref CURSORINFO pci);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool GetIconInfo(IntPtr hIcon, out ICONINFO piconinfo);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern bool DestroyIcon(IntPtr hIcon);
+
+    [DllImport("user32.dll")]
+    public static extern IntPtr LoadCursor(IntPtr hInstance, int lpCursorName);
+
+    [DllImport("user32.dll")]
+    public static extern bool DrawIconEx(IntPtr hdc, int xLeft, int yTop, IntPtr hIcon, int cxWidth, int cyWidth, uint istepIfAniCur, IntPtr hbrFlickerFreeDraw, uint diFlags);
 }
