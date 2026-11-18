@@ -1,0 +1,33 @@
+AetherDesk
+Copyright (c) 2026 AetherDesk Project Contributors. All rights reserved.
+
+This product includes software developed by the AetherDesk Project and its contributors.
+
+========================================================================
+THIRD-PARTY OPEN-SOURCE SOFTWARE NOTICES
+========================================================================
+
+This product contains components licensed under permissive open-source licenses:
+
+1. Microsoft.Data.Sqlite and Microsoft .NET Runtime Libraries
+   Copyright (c) .NET Foundation and Contributors.
+   Licensed under the MIT License.
+   https://github.com/dotnet/efcore
+   https://github.com/dotnet/runtime
+
+2. SQLitePCLRaw (Batteries, Core, Providers)
+   Copyright (c) 2014-2024 Eric Sink
+   Licensed under the Apache License, Version 2.0.
+   https://github.com/ericsink/SQLitePCL.raw
+
+3. SQLite Database Engine
+   SQLite is in the Public Domain.
+   Dedicated to the public domain by D. Richard Hipp and SQLite developers.
+   https://www.sqlite.org/copyright.html
+
+4. System.IO.Hashing
+   Copyright (c) .NET Foundation and Contributors.
+   Licensed under the MIT License.
+   https://github.com/dotnet/runtime
+
+For full text of third-party licenses, see docs/legal/THIRD_PARTY_ATTRIBUTIONS.md.

@@ -28,7 +28,8 @@
                     <Ellipse x:Name="ElpSignalingStatus" Width="10" Height="10" Fill="#10B981" Margin="0,0,8,0" />
                     <TextBlock x:Name="TxtSignalingStatus" Text="Signaling: Connected" Foreground="#9CA3AF" FontSize="12" VerticalAlignment="Center" Margin="0,0,16,0" />
                     <Button Content="Quick Host Test" Click="BtnQuickHostTest_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="10,5" Margin="0,0,8,0" Cursor="Hand" />
-                    <Button Content="Settings" Click="BtnSettings_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="10,5" Cursor="Hand" />
+                    <Button Content="Settings" Click="BtnSettings_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="10,5" Margin="0,0,8,0" Cursor="Hand" />
+                    <Button Content="About" Click="BtnAbout_Click" Background="#1F2937" Foreground="#E5E7EB" BorderBrush="#374151" Padding="10,5" Cursor="Hand" />
                 </StackPanel>
             </DockPanel>
         </Border>

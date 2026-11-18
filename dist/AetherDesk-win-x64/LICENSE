@@ -1,0 +1,20 @@
+AETHERDESK COMMUNITY EVALUATION & SOURCE LICENSE (DRAFT)
+Version 1.0 — November 2026
+
+Copyright (c) 2026 AetherDesk Project Contributors. All rights reserved.
+
+NOTICE: THIS IS AN OFFICIAL LEGAL DRAFT PENDING FORMAL EXECUTIVE AND SHAREHOLDER RATIFICATION.
+FOR THE FULL LICENSING POLICY AND OPTIONS, SEE docs/legal/LICENSING_POLICY.md.
+
+1. GRANT OF LICENSE
+Subject to the terms and conditions of this Agreement, the AetherDesk Project Contributors hereby grant to any person obtaining a copy of this software and associated documentation files (the "Software"), a royalty-free, non-exclusive, non-transferable license to:
+(a) Inspect, compile, run, and test the Software for personal, educational, research, and non-commercial technical support evaluation purposes;
+(b) Submit bug reports, code improvements, security disclosures, and pull requests to the official project repository.
+
+2. RESTRICTIONS
+(a) Commercial Deployment: You may not use, deploy, host, offer as a service, or distribute the Software for commercial gain, paid technical support services, or enterprise operational deployment without obtaining an authorized Commercial License.
+(b) Forking & Proprietary Sublicensing: You may not distribute modified, white-labeled, or rebranded binary distributions of the Software under proprietary or conflicting license terms without explicit written authorization.
+(c) Attribution: All copies or substantial portions of the Software, documentation, and user interfaces must retain the original copyright notice, this license notice, and third-party notices intact.
+
+3. DISCLAIMER OF WARRANTY
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES, OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT, OR OTHERWISE, ARISING FROM, OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.

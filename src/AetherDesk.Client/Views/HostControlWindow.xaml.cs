@@ -2,6 +2,7 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
 using AetherDesk.Core.Identity;
+using AetherDesk.Core.Protocol;
 using AetherDesk.Core.Protocol.Messages;
 using AetherDesk.Host.Session;
 
@@ -25,6 +26,12 @@ public partial class HostControlWindow : Window
         {
             TxtPartnerId.Text = "Partner: Active Viewer";
         }
+
+        // Initialize permission checkboxes reflecting current host session policy
+        ChkAllowMouse.IsChecked = coordinator.Permissions.HasFlag(SessionPermissions.AllowMouse);
+        ChkAllowKeyboard.IsChecked = coordinator.Permissions.HasFlag(SessionPermissions.AllowKeyboard);
+        ChkAllowClipboard.IsChecked = coordinator.Permissions.HasFlag(SessionPermissions.AllowClipboard);
+        ChkAllowFileTransfer.IsChecked = coordinator.Permissions.HasFlag(SessionPermissions.AllowFileTransfer);
 
         LstChat.ItemsSource = _chatMessages;
 
@@ -92,6 +99,17 @@ public partial class HostControlWindow : Window
         LstChat.ScrollIntoView(myMsg);
 
         _coordinator.SendChatMessage(text);
+    }
+
+    private void OnPermissionCheckbox_Click(object sender, RoutedEventArgs e)
+    {
+        SessionPermissions perms = SessionPermissions.None;
+        if (ChkAllowMouse.IsChecked == true) perms |= SessionPermissions.AllowMouse;
+        if (ChkAllowKeyboard.IsChecked == true) perms |= SessionPermissions.AllowKeyboard;
+        if (ChkAllowClipboard.IsChecked == true) perms |= SessionPermissions.AllowClipboard;
+        if (ChkAllowFileTransfer.IsChecked == true) perms |= SessionPermissions.AllowFileTransfer;
+
+        _coordinator.UpdatePermissions(perms);
     }
 
     private void BtnDisconnect_Click(object sender, RoutedEventArgs e)

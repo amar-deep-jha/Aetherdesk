@@ -223,6 +223,32 @@ public sealed class DatabaseService : IDisposable
         }
     }
 
+    public List<AuditLogEntry> GetAuditLogs(int limit = 50)
+    {
+        lock (_lock)
+        {
+            var list = new List<AuditLogEntry>();
+            using var cmd = _connection.CreateCommand();
+            cmd.CommandText = "SELECT Id, TimestampUtc, EventType, Description, SourceIp, Success FROM AuditLogs ORDER BY Id DESC LIMIT @Limit;";
+            cmd.Parameters.AddWithValue("@Limit", limit);
+
+            using var reader = cmd.ExecuteReader();
+            while (reader.Read())
+            {
+                list.Add(new AuditLogEntry
+                {
+                    Id = reader.GetInt64(0),
+                    TimestampUtc = DateTime.Parse(reader.GetString(1)),
+                    EventType = reader.GetString(2),
+                    Description = reader.GetString(3),
+                    SourceIp = reader.GetString(4),
+                    Success = reader.GetInt32(5) == 1
+                });
+            }
+            return list;
+        }
+    }
+
     public void Dispose()
     {
         _connection.Dispose();

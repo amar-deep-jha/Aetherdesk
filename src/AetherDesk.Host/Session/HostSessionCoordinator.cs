@@ -111,9 +111,11 @@ public sealed class HostSessionCoordinator : IDisposable
     public HandshakeResponse HandleHandshake(HandshakeRequest request)
     {
         PartnerDeviceId = request.DeviceId;
+        SecurityAuditLogger.Instance.LogSessionRequested(request.DeviceId, SessionId);
 
         byte[] sharedSecret = _ecdh.DeriveSharedKeyFromBase64(request.EphemeralPublicKeyBase64);
         _cipher = new AesGcmCipher(sharedSecret);
+        SecurityAuditLogger.Instance.LogHandshakeCompleted(request.DeviceId, SessionId);
 
         State = HostSessionState.AwaitingApproval;
 
@@ -142,6 +144,7 @@ public sealed class HostSessionCoordinator : IDisposable
     {
         Permissions = permissions;
         State = HostSessionState.Active;
+        SecurityAuditLogger.Instance.LogSessionAccepted(PartnerDeviceId ?? "Unknown", SessionId, permissions);
 
         // Broadcast initial screen resolution
         var resMsg = new ScreenResolutionMsg
@@ -180,12 +183,28 @@ public sealed class HostSessionCoordinator : IDisposable
     /// </summary>
     public bool VerifyUnattendedPassword(string password, string storedHash, SessionPermissions permissions)
     {
-        if (PasswordHasher.VerifyPassword(password, storedHash))
+        bool success = PasswordHasher.VerifyPassword(password, storedHash);
+        SecurityAuditLogger.Instance.LogUnattendedAuth(PartnerDeviceId ?? "Unknown", success, success ? "Credentials authenticated" : "Authentication rejected - invalid password");
+        if (success)
         {
             ApproveSession(permissions);
             return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Dynamically updates session permissions mid-session, enforcing policy changes immediately
+    /// and notifying the remote client.
+    /// </summary>
+    public void UpdatePermissions(SessionPermissions newPermissions)
+    {
+        var old = Permissions;
+        Permissions = newPermissions;
+        SecurityAuditLogger.Instance.LogPermissionChanged(SessionId, old, newPermissions);
+
+        var msg = new PermissionChangeMsg { Permissions = newPermissions };
+        SendEncrypted(AdbpOpCode.PermissionChange, msg.Serialize());
     }
 
     /// <summary>
@@ -211,6 +230,10 @@ public sealed class HostSessionCoordinator : IDisposable
                         WindowsInputInjector.InjectMouseMove(move.X, move.Y, move.IsNormalized, _capturer.Width, _capturer.Height);
                     }
                 }
+                else
+                {
+                    SecurityAuditLogger.Instance.LogPolicyViolation(SessionId, "Blocked unauthorized mouse move: permission revoked by host.");
+                }
                 break;
 
             case AdbpOpCode.MouseButton:
@@ -221,6 +244,10 @@ public sealed class HostSessionCoordinator : IDisposable
                     {
                         WindowsInputInjector.InjectMouseButton(btn.Button, btn.Action, btn.X, btn.Y, _capturer.Width, _capturer.Height);
                     }
+                }
+                else
+                {
+                    SecurityAuditLogger.Instance.LogPolicyViolation(SessionId, "Blocked unauthorized mouse button: permission revoked by host.");
                 }
                 break;
 
@@ -233,6 +260,10 @@ public sealed class HostSessionCoordinator : IDisposable
                         WindowsInputInjector.InjectMouseWheel(wheel.DeltaX, wheel.DeltaY);
                     }
                 }
+                else
+                {
+                    SecurityAuditLogger.Instance.LogPolicyViolation(SessionId, "Blocked unauthorized mouse wheel: permission revoked by host.");
+                }
                 break;
 
             case AdbpOpCode.KeyDown:
@@ -243,6 +274,10 @@ public sealed class HostSessionCoordinator : IDisposable
                     {
                         WindowsInputInjector.InjectKeyDown(kd.VirtualKey, kd.ScanCode, kd.Extended);
                     }
+                }
+                else
+                {
+                    SecurityAuditLogger.Instance.LogPolicyViolation(SessionId, "Blocked unauthorized key down: permission revoked by host.");
                 }
                 break;
 
@@ -255,6 +290,10 @@ public sealed class HostSessionCoordinator : IDisposable
                         WindowsInputInjector.InjectKeyUp(ku.VirtualKey, ku.ScanCode, ku.Extended);
                     }
                 }
+                else
+                {
+                    SecurityAuditLogger.Instance.LogPolicyViolation(SessionId, "Blocked unauthorized key up: permission revoked by host.");
+                }
                 break;
 
             case AdbpOpCode.UnicodeChar:
@@ -266,6 +305,10 @@ public sealed class HostSessionCoordinator : IDisposable
                         WindowsInputInjector.InjectUnicodeChar(uc.Character);
                     }
                 }
+                else
+                {
+                    SecurityAuditLogger.Instance.LogPolicyViolation(SessionId, "Blocked unauthorized unicode char: permission revoked by host.");
+                }
                 break;
 
             case AdbpOpCode.SystemCommand:
@@ -273,6 +316,10 @@ public sealed class HostSessionCoordinator : IDisposable
                 {
                     var sysCmd = SystemCommandMsg.Deserialize(payload);
                     WindowsInputInjector.InjectSystemCommand(sysCmd.Command);
+                }
+                else
+                {
+                    SecurityAuditLogger.Instance.LogPolicyViolation(SessionId, "Blocked unauthorized system command: permission revoked by host.");
                 }
                 break;
 
@@ -285,6 +332,10 @@ public sealed class HostSessionCoordinator : IDisposable
                         _lastSyncedClipboard = clip.Text;
                         ClipboardManager.SetText(clip.Text);
                     }
+                }
+                else
+                {
+                    SecurityAuditLogger.Instance.LogPolicyViolation(SessionId, "Blocked unauthorized clipboard sync: permission revoked by host.");
                 }
                 break;
 
@@ -324,6 +375,10 @@ public sealed class HostSessionCoordinator : IDisposable
                 if (Permissions.HasFlag(SessionPermissions.AllowFileTransfer))
                 {
                     HandleFileBrowse(payload);
+                }
+                else
+                {
+                    SecurityAuditLogger.Instance.LogPolicyViolation(SessionId, "Blocked unauthorized file browse: permission revoked by host.");
                 }
                 break;
 
@@ -421,6 +476,7 @@ public sealed class HostSessionCoordinator : IDisposable
     {
         if (!Permissions.HasFlag(SessionPermissions.AllowFileTransfer))
         {
+            SecurityAuditLogger.Instance.LogPolicyViolation(SessionId, "Blocked file transfer initialization: permission revoked by host.");
             var deniedAck = new FileTransferAckMsg { Success = false, Error = "File transfer permission denied by host." };
             SendEncrypted(AdbpOpCode.FileTransferAck, deniedAck.Serialize());
             return;
@@ -428,6 +484,7 @@ public sealed class HostSessionCoordinator : IDisposable
 
         var init = FileTransferInitMsg.Deserialize(payload);
         if (init == null) return;
+        SecurityAuditLogger.Instance.LogFileTransferRequested(SessionId, init.FileName, init.TotalSize);
 
         if (init.Direction == FileTransferDirection.Upload)
         {
@@ -734,6 +791,8 @@ public sealed class HostSessionCoordinator : IDisposable
 
         State = HostSessionState.Terminated;
         _cts.Cancel();
+
+        SecurityAuditLogger.Instance.LogSessionTerminated(SessionId, reason);
 
         var notice = new SessionControlMsg { Action = SessionActionType.Disconnect, Reason = reason };
         try

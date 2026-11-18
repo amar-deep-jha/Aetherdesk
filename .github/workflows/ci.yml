@@ -1,0 +1,50 @@
+name: AetherDesk CI Pipeline
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  build-and-test-windows:
+    name: Build & Test (.NET 10 on Windows)
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup .NET SDK
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Restore Dependencies
+      run: dotnet restore AetherDesk.slnx
+
+    - name: Build Solution (Release)
+      run: dotnet build AetherDesk.slnx -c Release --no-restore
+
+    - name: Run Test Suite
+      run: dotnet test AetherDesk.slnx -c Release --no-build --verbosity normal --logger "console;verbosity=detailed"
+
+  build-signaling-server:
+    name: Build Signaling Server (Docker / Node)
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Repository
+      uses: actions/checkout@v4
+
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
+    - name: Install Signaling Server Dependencies
+      working-directory: ./server
+      run: npm ci || npm install
+
+    - name: Test Dockerfile Build
+      run: docker build -t aetherdesk-signaling:ci .

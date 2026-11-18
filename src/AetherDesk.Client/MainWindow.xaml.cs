@@ -59,6 +59,9 @@ public partial class MainWindow : Window
         // Display local identity
         TxtLocalDeviceId.Text = _identity.FormattedId;
 
+        // Connect audit logger to local database
+        SecurityAuditLogger.Instance.SetDatabase(_database);
+
         // Initialize local host coordinator
         _hostCoordinator = new HostSessionCoordinator();
         _hostCoordinator.Initialize();
@@ -378,6 +381,13 @@ public partial class MainWindow : Window
             LogDiagnostic($"Applying new server URL: {win.ServerUrl}");
             await _networkManager.StartSignalingAsync(win.ServerUrl);
         }
+    }
+
+    private void BtnAbout_Click(object sender, RoutedEventArgs e)
+    {
+        var aboutWin = new AboutWindow();
+        aboutWin.Owner = this;
+        aboutWin.ShowDialog();
     }
 
     protected override void OnClosed(EventArgs e)

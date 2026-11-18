@@ -57,7 +57,10 @@ public sealed class ViewerSession : IDisposable
     public event Action<FileTransferInitMsg>? FileTransferInitReceived;
     public event Action<FileTransferChunkMsg>? FileTransferChunkReceived;
     public event Action<FileTransferAckMsg>? FileTransferAckReceived;
+    public event Action<SessionPermissions>? PermissionsChanged;
     public event Action<string>? SessionDisconnected;
+
+    public SessionPermissions Permissions { get; private set; } = SessionPermissions.All;
 
     public ViewerSession(string partnerId, string sessionId)
     {
@@ -330,6 +333,15 @@ public sealed class ViewerSession : IDisposable
                 if (ftAck != null)
                 {
                     FileTransferAckReceived?.Invoke(ftAck);
+                }
+                break;
+
+            case AdbpOpCode.PermissionChange:
+                var permChange = PermissionChangeMsg.Deserialize(payload);
+                if (permChange != null)
+                {
+                    Permissions = permChange.Permissions;
+                    PermissionsChanged?.Invoke(permChange.Permissions);
                 }
                 break;
 
